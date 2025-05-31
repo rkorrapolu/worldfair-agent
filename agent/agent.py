@@ -55,6 +55,7 @@ def display_results(output: Dict):
       title="[bold]Query Analysis[/bold]",
       border_style="blue"
   )
+  console.print()
   console.print(query_panel)
   console.print()
 
