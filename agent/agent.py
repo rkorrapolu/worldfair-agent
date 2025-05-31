@@ -1,8 +1,14 @@
 import json
+import asyncio
 from typing import TypedDict, List, Dict
 
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+
 import numpy as np
-from openai import OpenAI
+from openai import AsyncOpenAI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from langgraph.graph import StateGraph
@@ -32,45 +38,107 @@ class Settings(BaseSettings):
   def is_development(self) -> bool:
     return self.environment.lower() == "local"
 
-settings = Settings()
-logger = initialize_logger(__name__, settings.is_development, settings.log_level)
-
 class GraphState(TypedDict):
   user_input: str
   responses: List[Dict[str, float]]
 
-def generate_responses_with_confidence(state: GraphState) -> GraphState:
+settings = Settings()
+logger = initialize_logger(__name__, settings.is_development, settings.log_level)
+
+def display_results(output: Dict):
+  """Performance Visualization -> Structured Analytics Display"""
+  console = Console()
+
+  # Query Header
+  query_panel = Panel(
+      Text(output["query"], style="bold cyan"),
+      title="[bold]Query Analysis[/bold]",
+      border_style="blue"
+  )
+  console.print(query_panel)
+  console.print()
+
+  # Response Analysis Table
+  response_table = Table(
+      title="Response Generation Framework",
+      show_header=True,
+      header_style="bold magenta"
+  )
+
+  response_table.add_column("Variant", style="dim", width=12)
+  response_table.add_column("Confidence", justify="center", style="green", width=10)
+  response_table.add_column("Response Content", style="white", width=80)
+  for resp in output["responses"]:
+    confidence_color = "red" if resp["confidence"] < 0.5 else "yellow" if resp["confidence"] < 0.7 else "green"
+    response_table.add_row(
+      resp["variant"].upper(),
+      f"[{confidence_color}]{resp['confidence']:.3f}[/{confidence_color}]",
+      resp["response"][:150] + "..." if len(resp["response"]) > 150 else resp["response"]
+    )
+
+  console.print(response_table)
+  console.print()
+  # Performance Analytics Table
+  analytics_table = Table(
+    title="Performance Analytics Dashboard",
+    show_header=True,
+    header_style="bold yellow"
+  )
+
+  analytics_table.add_column("Metric", style="cyan", width=25)
+  analytics_table.add_column("Value", justify="center", style="white", width=15)
+  analytics_table.add_column("Performance Grade", justify="center", style="green", width=20)
+  analytics = output["analytics"]
+
+  # Performance grading framework
+  avg_conf = analytics["avg_confidence"]
+  grade = "EXCELLENT" if avg_conf > 0.8 else "GOOD" if avg_conf > 0.6 else "MODERATE"
+  grade_color = "green" if avg_conf > 0.8 else "yellow" if avg_conf > 0.6 else "red"
+
+  analytics_table.add_row("Average Confidence", f"{avg_conf:.3f}", f"[{grade_color}]{grade}[/{grade_color}]")
+  analytics_table.add_row("Peak Confidence", f"{analytics['peak_confidence']:.3f}", "OPTIMAL")
+  analytics_table.add_row("Response Diversity", f"{analytics['response_diversity']}", "HIGH")
+
+  console.print(analytics_table)
+
+async def generate_single_response(client: AsyncOpenAI, prompt: str, temperature: float, variant: str) -> Dict[str, float]:
+  """Single Response Generation -> Confidence Scoring"""
+
+  response = await client.chat.completions.create(
+    model="gpt-4.1",
+    messages=[{"role": "user", "content": prompt}],
+    temperature=temperature,
+    max_tokens=200
+  )
+
+  content = response.choices[0].message.content
+  confidence_score = calculate_confidence(content, prompt)
+
+  return {
+    "response": content,
+    "confidence": confidence_score,
+    "variant": variant
+  }
+
+async def generate_responses_with_confidence(state: GraphState) -> GraphState:
   """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
 
-  client = OpenAI(api_key=settings.genai_openai_api_key)
+  client = AsyncOpenAI(api_key=settings.genai_openai_api_key)
   user_query = state["user_input"]
 
   # Generate 3 diverse responses
-  prompts = [
-    f"Provide a comprehensive answer: {user_query}",
-    f"Give a concise, practical response: {user_query}",
-    f"Offer an innovative perspective: {user_query}"
+  prompt_configs = [
+    (f"Provide a comprehensive answer: {user_query}", 0.1, "analytical"),
+    (f"Give a concise, practical response: {user_query}", 0.4, "practical"),
+    (f"Offer an innovative perspective: {user_query}", 0.7, "creative")
   ]
 
-  responses = []
-  for i, prompt in enumerate(prompts):
-    response = client.chat.completions.create(
-      model="gpt-4.1",
-      messages=[{"role": "user", "content": prompt}],
-      temperature=0.1 + (i * 0.3),  # Vary creativity
-      max_tokens=200
-    )
-
-    content = response.choices[0].message.content
-
-    # Calculate confidence metrics
-    confidence_score = calculate_confidence(content, user_query)
-    responses.append({
-      "response": content,
-      "confidence": confidence_score,
-      "variant": f"approach_{i + 1}"
-    })
-
+  # Parallel execution
+  tasks = [
+    generate_single_response(client, prompt, temp, variant)
+    for prompt, temp, variant in prompt_configs
+  ]
+  responses = await asyncio.gather(*tasks)
   return {"user_input": user_query, "responses": responses}
 
 def calculate_confidence(response: str, query: str) -> float:
@@ -103,10 +171,11 @@ def create_response_graph():
   return workflow.compile()
 
 # Execution Framework
-def run_analysis(user_input: str) -> Dict:
+async def run_analysis(user_input: str) -> Dict:
   """Input Processing -> Response Generation -> Confidence Assessment"""
   graph = create_response_graph()
-  result = graph.invoke({
+  # print(graph.get_graph().draw_mermaid())
+  result = await graph.ainvoke({
     "user_input": user_input,
     "responses": []
   })
@@ -118,11 +187,15 @@ def run_analysis(user_input: str) -> Dict:
     "responses": result["responses"],
     "analytics": {
       "avg_confidence": round(np.mean(confidence_scores), 3),
+      "peak_confidence": max(confidence_scores),
       "max_confidence": max(confidence_scores),
       "response_diversity": len(set(r["response"][:50] for r in result["responses"]))
     }
   }
 
+async def main():
+  output = await run_analysis("How can I improve my productivity at work?")
+  display_results(output)
+
 if __name__ == "__main__":
-  output = run_analysis("How can I improve my productivity at work?")
-  print(json.dumps(output, indent=2))
+  asyncio.run(main())
