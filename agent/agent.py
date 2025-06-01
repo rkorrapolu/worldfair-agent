@@ -1,10 +1,16 @@
 import asyncio
 import json
 import os
+import asyncio
 from typing import Dict
 
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+
 import numpy as np
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from langgraph.graph import StateGraph
@@ -41,6 +47,63 @@ class Settings(BaseSettings):
 
 settings = Settings()
 logger = initialize_logger(__name__, settings.is_development, settings.log_level)
+
+def display_results(output: Dict):
+  """Performance Visualization -> Structured Analytics Display"""
+  console = Console()
+
+  # Query Header
+  query_panel = Panel(
+      Text(output["query"], style="bold cyan"),
+      title="[bold]Query Analysis[/bold]",
+      border_style="blue"
+  )
+  console.print()
+  console.print(query_panel)
+  console.print()
+
+  # Response Analysis Table
+  response_table = Table(
+      title="Response Generation Framework",
+      show_header=True,
+      header_style="bold magenta"
+  )
+
+  response_table.add_column("Variant", style="dim", width=12)
+  response_table.add_column("Confidence", justify="center", style="green", width=10)
+  response_table.add_column("Response Content", style="white", width=80)
+  for resp in output["responses"]:
+    confidence_color = "red" if resp["confidence"] < 0.5 else "yellow" if resp["confidence"] < 0.7 else "green"
+    response_table.add_row(
+      resp["variant"].upper(),
+      f"[{confidence_color}]{resp['confidence']:.3f}[/{confidence_color}]",
+      resp["response"][:150] + "..." if len(resp["response"]) > 150 else resp["response"]
+    )
+
+  console.print(response_table)
+  console.print()
+  # Performance Analytics Table
+  analytics_table = Table(
+    title="Performance Analytics Dashboard",
+    show_header=True,
+    header_style="bold yellow"
+  )
+
+  analytics_table.add_column("Metric", style="cyan", width=25)
+  analytics_table.add_column("Value", justify="center", style="white", width=15)
+  analytics_table.add_column("Performance Grade", justify="center", style="green", width=20)
+  analytics = output["analytics"]
+
+  # Performance grading framework
+  avg_conf = analytics["avg_confidence"]
+  grade = "EXCELLENT" if avg_conf > 0.8 else "GOOD" if avg_conf > 0.6 else "MODERATE"
+  grade_color = "green" if avg_conf > 0.8 else "yellow" if avg_conf > 0.6 else "red"
+
+  analytics_table.add_row("Average Confidence", f"{avg_conf:.3f}", f"[{grade_color}]{grade}[/{grade_color}]")
+  analytics_table.add_row("Peak Confidence", f"{analytics['peak_confidence']:.3f}", "OPTIMAL")
+  analytics_table.add_row("Response Diversity", f"{analytics['response_diversity']}", "HIGH")
+
+  console.print(analytics_table)
 
 async def generate_single_response(client: AsyncOpenAI, prompt: str, temperature: float) -> str:
   """Single Response Generation -> Confidence Scoring"""
@@ -98,10 +161,11 @@ def create_response_graph():
   return workflow.compile()
 
 # Execution Framework
-def run_analysis(user_input: str) -> Dict:
+async def run_analysis(user_input: str) -> Dict:
   """Input Processing -> Response Generation -> Confidence Assessment"""
   graph = create_response_graph()
-  result = graph.invoke({
+  # print(graph.get_graph().draw_mermaid())
+  result = await graph.ainvoke({
     "user_input": user_input,
     "responses": []
   })
@@ -113,11 +177,15 @@ def run_analysis(user_input: str) -> Dict:
     "responses": result["responses"],
     "analytics": {
       "avg_confidence": round(np.mean(confidence_scores), 3),
+      "peak_confidence": max(confidence_scores),
       "max_confidence": max(confidence_scores),
       "response_diversity": len(set(r["response"][:50] for r in result["responses"]))
     }
   }
 
+async def main():
+  output = await run_analysis("How can I improve my productivity at work?")
+  display_results(output)
+
 if __name__ == "__main__":
-  output = run_analysis("How can I improve my productivity at work?")
-  print(json.dumps(output, indent=2))
+  asyncio.run(main())
