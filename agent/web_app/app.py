@@ -100,9 +100,9 @@ class ChatLangGraph:
         if thread_id in confidence_subscribers:
             del confidence_subscribers[thread_id]
 
-    def query(self, message: str, thread_id: str | None = None) -> Iterator[str]:
+    async def aquery(self, message: str, thread_id: str | None = None) -> AsyncGenerator[str, None]:
         """
-        Query the chatbot and yield response tokens.
+        Async version of query that uses LangGraph's native async streaming.
         """
         # Ensure thread exists
         if thread_id and thread_id not in self.active_threads:
@@ -111,7 +111,7 @@ class ChatLangGraph:
         if not thread_id:
             thread_id = self.create_new_thread()
 
-        # Use LangGraph implementation
+        # Use LangGraph implementation with async streaming
         input_data = {
             "messages": [HumanMessage(content=message)],
             "confidence_score": 1.0,
@@ -119,47 +119,26 @@ class ChatLangGraph:
 
         config = RunnableConfig(configurable={"thread_id": thread_id})
 
-        # Use regular invoke and simulate streaming by splitting response
-        result = self.graph.invoke(input_data, config=config)
-        if "messages" in result and result["messages"]:
-            # Get the AI message content
-            ai_message = result["messages"][-1]
-            response_content = ai_message.content
+        # Use LangGraph's built-in async streaming to get real-time updates
+        try:
+            async for chunk in self.graph.astream(input_data, config=config, stream_mode="values"):
+                # Check if there are new messages in the state
+                if "messages" in chunk and chunk["messages"]:
+                    # Get the latest AI message
+                    latest_message = chunk["messages"][-1]
+                    if hasattr(latest_message, 'content') and latest_message.content:
+                        # Yield the content
+                        yield latest_message.content
+                        break
 
-            # Yield word by word to simulate streaming
-            words = response_content.split()
-            for i, word in enumerate(words):
-                if i == 0:
-                    yield word
-                else:
-                    yield " " + word
-        else:
-            yield "I apologize, but I couldn't generate a response."
+                # Also yield confidence updates if they changed
+                if "confidence_score" in chunk:
+                    await broadcast_confidence_update(thread_id, chunk["confidence_score"])
+        except Exception as e:
+            yield f"I apologize, but I encountered an error: {str(e)}"
 
         # Update thread metadata
         self.active_threads[thread_id]["message_count"] += 2  # Human + AI message
-
-    async def stream_graph_state(self, thread_id: str) -> AsyncGenerator[dict, None]:
-        """
-        Stream graph state changes for a specific thread.
-        """
-        if thread_id not in self.active_threads:
-            return
-
-        config = RunnableConfig(configurable={"thread_id": thread_id})
-
-        # Continuously monitor for state changes
-        while True:
-            # Get current confidence score
-            current_confidence = self.get_thread_confidence(thread_id)
-
-            yield {
-                "type": "confidence_update",
-                "thread_id": thread_id,
-                "confidence": current_confidence,
-            }
-
-            await asyncio.sleep(2)  # Check every 2 seconds
 
 
 async def broadcast_confidence_update(thread_id: str, confidence_score: float):
@@ -339,7 +318,7 @@ async def chat_stream(
             full_response = ""
 
             # Stream the response from the chatbot
-            for token in bot.query(chat_message.message, chat_message.thread_id):
+            async for token in bot.aquery(chat_message.message, chat_message.thread_id):
                 full_response += token
                 # Send each token as a streaming event
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
