@@ -37,7 +37,7 @@ async def calculate_contrast(state: GraphState) -> GraphState:
         HumanMessage(content=contrast_prompt)
     ]
     
-    llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(ContrastEvaluatorOutput)
+    llm = init_chat_model(model="openai:gpt-4.1-mini", api_key=openai_api_key).with_structured_output(ContrastEvaluatorOutput)
     response = await cast("ContrastEvaluatorOutput", llm.ainvoke(messages))
     
     score = response.contrast_score
@@ -66,7 +66,7 @@ async def evaluate_relevance(state: GraphState) -> GraphState:
         HumanMessage(content=relevance_prompt)
     ]
     
-    llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(RelevanceEvaluatorOutput)
+    llm = init_chat_model(model="openai:gpt-4.1-mini", api_key=openai_api_key).with_structured_output(RelevanceEvaluatorOutput)
     response = await cast("RelevanceEvaluatorOutput", llm.ainvoke(messages))
     
     scores = response.relevance_scores
@@ -98,10 +98,10 @@ Make sure you ask the judge LLM to output a score from 0-1 for the instrucrted m
         HumanMessage(content=f"user_task_prompt: {state['user_input']}")
     ]
     
-    meta_llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(UniversalMetaEvaluatorOutput)
+    meta_llm = init_chat_model(model="openai:gpt-4.1-mini", api_key=openai_api_key).with_structured_output(UniversalMetaEvaluatorOutput)
     meta_response = await cast("UniversalMetaEvaluatorOutput", meta_llm.ainvoke(messages))
 
-    llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(UniversalEvaluatorOutput)
+    llm = init_chat_model(model="openai:gpt-4.1-mini", api_key=openai_api_key).with_structured_output(UniversalEvaluatorOutput)
     content= f"""
 user_task_prompt: {state['user_input']}
 
