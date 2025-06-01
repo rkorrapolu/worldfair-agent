@@ -742,10 +742,12 @@
         }
 
         function initializeConfidenceMeter() {
-            // Don't connect to confidence stream yet - wait for thread selection
             // Set initial threshold line position
             updateThresholdLine();
-            updateConfidenceStatus('No active thread');
+            updateConfidenceStatus('Select a thread to monitor confidence');
+
+            // Initialize with default confidence display
+            updateConfidenceDisplay(1.0);
         }
 
         function connectToConfidenceStream(threadId) {
@@ -758,7 +760,12 @@
                 return;
             }
 
+            updateConfidenceStatus('Connecting...');
             confidenceEventSource = new EventSource(`/api/confidence/stream?thread_id=${threadId}`);
+
+            confidenceEventSource.onopen = function(event) {
+                updateConfidenceStatus('Connected - waiting for updates');
+            };
 
             confidenceEventSource.onmessage = function(event) {
                 try {
@@ -771,14 +778,19 @@
 
             confidenceEventSource.onerror = function(event) {
                 console.error('Confidence stream error:', event);
-                updateConfidenceStatus('Connection error - retrying...');
 
-                // Reconnect after a delay
-                setTimeout(() => {
-                    if (confidenceEventSource.readyState === EventSource.CLOSED) {
-                        connectToConfidenceStream(threadId);
-                    }
-                }, 5000);
+                if (confidenceEventSource.readyState === EventSource.CLOSED) {
+                    updateConfidenceStatus('Connection closed');
+                } else {
+                    updateConfidenceStatus('Connection error - retrying...');
+
+                    // Reconnect after a delay
+                    setTimeout(() => {
+                        if (currentThreadId === threadId && confidenceEventSource.readyState === EventSource.CLOSED) {
+                            connectToConfidenceStream(threadId);
+                        }
+                    }, 5000);
+                }
             };
         }
 
@@ -788,13 +800,21 @@
                     // Only update if this confidence update is for the current thread
                     if (data.thread_id === currentThreadId) {
                         updateConfidenceDisplay(data.confidence);
-                        updateConfidenceStatus(`Last updated: ${new Date().toLocaleTimeString()}`);
+                        updateConfidenceStatus(`Updated: ${new Date().toLocaleTimeString()}`);
                     }
                     break;
 
-                case 'heartbeat':
-                    updateConfidenceStatus('Connected');
+                case 'ping':
+                    updateConfidenceStatus('Connected - listening');
                     break;
+
+                case 'error':
+                    console.error('Confidence stream error:', data.message);
+                    updateConfidenceStatus(`Error: ${data.message}`);
+                    break;
+
+                default:
+                    console.log('Unknown confidence update type:', data.type);
             }
         }
 
@@ -935,8 +955,13 @@
 
             document.getElementById('currentThread').textContent = 'Start a new conversation';
 
-            // Disconnect from confidence stream since no thread is active
-            connectToConfidenceStream(null);
+            // Disconnect from confidence stream and reset display
+            if (confidenceEventSource) {
+                confidenceEventSource.close();
+                confidenceEventSource = null;
+            }
+            updateConfidenceStatus('No active thread');
+            updateConfidenceDisplay(1.0); // Reset to default
         }
 
         function startNewChat() {
@@ -971,7 +996,7 @@
                 toggleSidebar();
             }
 
-            // Reconnect to confidence stream
+            // Connect to confidence stream for this thread
             connectToConfidenceStream(threadId);
         }
 
@@ -1149,6 +1174,11 @@
 
                                     // Always reload threads to update message count in sidebar
                                     await loadThreads();
+
+                                    // Update confidence status to indicate streaming is complete
+                                    if (currentThreadId) {
+                                        updateConfidenceStatus('Response complete - monitoring for updates');
+                                    }
                                 } else if (data.type === 'error') {
                                     showError(`Error: ${data.message}`);
                                     assistantMessage.textContent = 'Sorry, I encountered an error processing your request.';

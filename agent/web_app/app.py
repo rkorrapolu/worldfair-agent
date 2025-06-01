@@ -3,11 +3,11 @@ import os
 from datetime import datetime
 from uuid import uuid4
 import asyncio
-from typing import AsyncGenerator, Annotated, Iterator, TypedDict
+from typing import AsyncGenerator, Annotated, TypedDict
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from agent.agent import create_response_graph
+from agent import create_response_graph
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,33 +18,21 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import json
 
-# Import LangGraph components
 from langgraph.graph.message import add_messages
-from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langchain.chat_models import init_chat_model
+from langgraph.graph.state import CompiledStateGraph
 
 load_dotenv()
 
-# Global confidence settings
-confidence_subscribers: dict[str, set] = (
-    {}
-)  # Track active confidence stream connections per thread
-
-
-# LangGraph State definition
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     confidence_score: float
 
 
 class ChatLangGraph:
-    def __init__(self, llm_model: str = "gpt-4", **kwargs):
-        self.llm_model = llm_model
-        self.llm = init_chat_model(llm_model)
-
-        self.graph = create_response_graph()
+    def __init__(self):
+        self.graph: CompiledStateGraph = create_response_graph() # type: ignore
         self.active_threads = {}
 
     def create_new_thread(self) -> str:
@@ -96,10 +84,6 @@ class ChatLangGraph:
             raise KeyError(f"Thread {thread_id} not found")
         del self.active_threads[thread_id]
 
-        # Clean up confidence subscribers for this thread
-        if thread_id in confidence_subscribers:
-            del confidence_subscribers[thread_id]
-
     async def aquery(self, message: str, thread_id: str | None = None) -> AsyncGenerator[str, None]:
         """
         Async version of query that uses LangGraph's native async streaming.
@@ -131,43 +115,54 @@ class ChatLangGraph:
                         yield latest_message.content
                         break
 
-                # Also yield confidence updates if they changed
-                if "confidence_score" in chunk:
-                    await broadcast_confidence_update(thread_id, chunk["confidence_score"])
         except Exception as e:
             yield f"I apologize, but I encountered an error: {str(e)}"
 
         # Update thread metadata
         self.active_threads[thread_id]["message_count"] += 2  # Human + AI message
 
+    async def astream_confidence(self, thread_id: str) -> AsyncGenerator[dict, None]:
+        """
+        Stream confidence updates for a specific thread using LangGraph's native streaming.
+        This creates a passive listener that streams confidence updates only during active chat.
+        """
+        if thread_id not in self.active_threads:
+            raise KeyError(f"Thread {thread_id} not found")
 
-async def broadcast_confidence_update(thread_id: str, confidence_score: float):
-    """Broadcast confidence update to all connected clients for a specific thread."""
-    # Thread-specific confidence data
-    confidence_data = {
-        "type": "confidence_update",
-        "thread_id": thread_id,
-        "confidence": confidence_score,
-    }
+        config = RunnableConfig(configurable={"thread_id": thread_id})
 
-    # Get subscribers for this thread
-    thread_subscribers = confidence_subscribers.get(thread_id, set())
-
-    # Remove disconnected subscribers
-    disconnected = []
-    for subscriber in thread_subscribers:
         try:
-            await subscriber.put(confidence_data)
-        except:
-            disconnected.append(subscriber)
+            # Send initial confidence value
+            current_confidence = self.get_thread_confidence(thread_id)
+            yield {
+                "type": "confidence_update",
+                "thread_id": thread_id,
+                "confidence": current_confidence,
+            }
 
-    for subscriber in disconnected:
-        thread_subscribers.discard(subscriber)
+            # Stream confidence updates from LangGraph's native streaming
+            # This will only emit updates when the graph is actively running
+            async for chunk in self.graph.astream(
+                {},  # Empty input to just listen for state changes
+                config=config,
+                stream_mode="values"
+            ):
+                if "confidence_score" in chunk:
+                    yield {
+                        "type": "confidence_update",
+                        "thread_id": thread_id,
+                        "confidence": chunk["confidence_score"],
+                    }
 
-    # Clean up empty thread subscriber sets
-    if not thread_subscribers and thread_id in confidence_subscribers:
-        del confidence_subscribers[thread_id]
+        except Exception as e:
+            yield {
+                "type": "error",
+                "message": str(e),
+                "thread_id": thread_id,
+            }
 
+
+# Remove the broadcast_confidence_update function since LangGraph handles streaming natively
 
 # Initialize the chatbot
 chatbot: ChatLangGraph | None = None
@@ -177,10 +172,7 @@ chatbot: ChatLangGraph | None = None
 async def lifespan(app: FastAPI):
     # Startup
     global chatbot
-    # TODO: Replace with your actual LangGraph implementation
-    chatbot = ChatLangGraph(
-        llm_model="your-model-name",  # Replace with your desired model
-    )
+    chatbot = ChatLangGraph()
     yield
     # Shutdown (cleanup if needed)
     chatbot = None
@@ -346,47 +338,21 @@ async def chat_stream(
 async def confidence_stream(
     thread_id: str, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
 ):
-    """Stream real-time confidence updates using Server-Sent Events for a specific thread."""
+    """Stream real-time confidence updates using LangGraph's native streaming capabilities."""
 
     async def generate_confidence_stream() -> AsyncGenerator[str, None]:
-        # Create a queue for this connection
-        queue = asyncio.Queue()
-
-        # Initialize thread subscribers if not exists
-        if thread_id not in confidence_subscribers:
-            confidence_subscribers[thread_id] = set()
-
-        confidence_subscribers[thread_id].add(queue)
-
         try:
-            # Send initial confidence value if available
-            current_confidence = bot.get_thread_confidence(thread_id)
-            initial_data = {
-                "type": "confidence_update",
-                "thread_id": thread_id,
-                "confidence": current_confidence,
-            }
-            yield f"data: {json.dumps(initial_data)}\n\n"
+            async for confidence_data in bot.astream_confidence(thread_id):
+                yield f"data: {json.dumps(confidence_data)}\n\n"
 
-            # Stream confidence updates from LangGraph's native streaming
-            async for chunk in bot.stream_graph_state(thread_id):
-                # Broadcast to all subscribers for this thread
-                await broadcast_confidence_update(thread_id, chunk["confidence"])
-
-                # Also yield directly to this connection
-                yield f"data: {json.dumps(chunk)}\n\n"
-
+        except KeyError:
+            # Thread doesn't exist
+            error_data = {"type": "error", "message": "Thread not found", "thread_id": thread_id}
+            yield f"data: {json.dumps(error_data)}\n\n"
         except Exception as e:
-            # Send error event but continue streaming
+            # Send error event
             error_data = {"type": "error", "message": str(e), "thread_id": thread_id}
             yield f"data: {json.dumps(error_data)}\n\n"
-        finally:
-            # Clean up subscriber
-            if thread_id in confidence_subscribers:
-                confidence_subscribers[thread_id].discard(queue)
-                # Clean up empty thread subscriber sets
-                if not confidence_subscribers[thread_id]:
-                    del confidence_subscribers[thread_id]
 
     return StreamingResponse(
         generate_confidence_stream(),
