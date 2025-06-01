@@ -119,7 +119,7 @@ async def generate_feedback_questions(state: GraphState) -> GraphState:
   return state
 
 # Graph Construction
-def create_response_graph(checkpointer):
+def create_response_graph(checkpointer=None):
   """Graph Assembly -> Single Node -> Multi-Response Generator"""
   workflow = StateGraph(GraphState)
   # Single processing node
@@ -133,8 +133,10 @@ def create_response_graph(checkpointer):
   workflow.set_entry_point("generate_responses")
   workflow.add_edge("generate_responses", "evaluate_relevance")
   workflow.add_edge("generate_responses", "calculate_contrast")
+  workflow.add_edge("calculate_contrast", "calculate_confidence")
   workflow.add_edge("evaluate_relevance", "calculate_confidence")
   workflow.add_edge("calculate_confidence", "generate_feedback_questions")
+
   workflow.set_finish_point("generate_feedback_questions")
 
   return workflow.compile(checkpointer=checkpointer)
@@ -278,7 +280,7 @@ def display_feedback_questions(feedback_data: Dict):
 # Execution framework
 async def run_analysis(user_input: str) -> Dict:
   """Input Processing -> Response Generation -> Confidence Assessment"""
-  graph = create_response_graph(None)
+  graph = create_response_graph()
   # print(graph.get_graph().draw_mermaid())
   result = await graph.ainvoke({
     "messages": [
