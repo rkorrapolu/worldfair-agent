@@ -175,7 +175,7 @@ def create_response_graph(checkpointer):
 # Execution Framework
 async def run_analysis(user_input: str) -> Dict:
   """Input Processing -> Response Generation -> Confidence Assessment"""
-  graph = create_response_graph()
+  graph = create_response_graph(None)
   # print(graph.get_graph().draw_mermaid())
   result = await graph.ainvoke({
     "user_input": user_input,
