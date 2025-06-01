@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 from state import GraphState
 from setup_logger import initialize_logger
 from langgraph.graph import StateGraph
-from langchain_core.messages import BaseMessage, AIMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from langchain.chat_models import init_chat_model
 
 from rich.console import Console
@@ -53,11 +53,12 @@ class Settings(BaseSettings):
 settings = Settings()
 logger = initialize_logger(__name__, settings.is_development, settings.log_level)
 
-async def generate_single_response(messages: list[BaseMessage], model: str, temperature: float) -> AIMessage:
+async def generate_single_response(messages: list[BaseMessage], model: str, prompt: str, temperature: float) -> AIMessage:
   """Single Response Generation -> Confidence Scoring"""
 
   llm = init_chat_model(model=model, api_key=openai_api_key, temperature=temperature)
-  response = await llm.ainvoke(messages)
+  custom_messages = messages[:-1] + [HumanMessage(content=prompt)]
+  response = await llm.ainvoke(custom_messages)
 
   return cast("AIMessage", response)
 
@@ -65,14 +66,20 @@ async def generate_responses(state: GraphState) -> GraphState:
   """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
 
   user_input = state["messages"][-1].content
+  # prompt_configs = [
+  #   ("openai:gpt-4.1", f"Provide a comprehensive answer: {user_input}", 0.1),
+  #   ("openai:gpt-4.1-mini", f"Give a concise, practical response: {user_input}", 0.4),
+  #   ("openai:gpt-4.1-nano", f"Offer an innovative perspective: {user_input}", 0.7)
+  # ]
+  prompt_configs = [
+    ("openai:gpt-4.1", user_input, 0.1),
+    ("openai:gpt-4.1-mini", user_input, 0.4),
+    ("openai:gpt-4.1-nano", user_input, 0.7)
+  ]
   # Parallel execution
   tasks = [
-    generate_single_response(state["messages"], model, temp)
-    for model, temp in [
-      ("openai:gpt-4.1", 0.1),
-      ("openai:gpt-4.1-mini", 0.1),
-      ("openai:gpt-4.1-nano", 0.1)
-    ]
+    generate_single_response(state["messages"], model, prompt, temp)
+    for model, prompt, temp in prompt_configs
   ]
   responses = await asyncio.gather(*tasks)
   state["responses"] = [response.content for response in responses]
