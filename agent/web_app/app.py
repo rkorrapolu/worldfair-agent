@@ -258,19 +258,22 @@ async def chat_stream(
             mode, data = chunk["chunk"]
 
             if mode == "messages" and isinstance(data, tuple) and data[1]["langgraph_node"] in ["generate_responses", "generate_feedback_questions"]:
-                
                 if not "no_stream" in data[1].get("tags",""):
                     message_content = data[0].content
                     full_response += message_content
                     yield f"data: {json.dumps({'type': 'token', 'content': message_content})}\n\n"
 
-            elif mode == "values" and "confidence_score" in data:
-                update = {
-                    "type": "confidence_update",
-                    "thread_id": chunk["thread_id"],
-                    "confidence": data["confidence_score"],
-                }
-                yield f"data: {json.dumps(update)}\n\n"
+            elif mode == "values":
+                if "confidence_score" in data:
+                    update = {
+                        "type": "confidence_update",
+                        "thread_id": chunk["thread_id"],
+                        "confidence": data["confidence_score"],
+                    }
+                    yield f"data: {json.dumps(update)}\n\n"
+                if "messages" in data:
+                    yield f"data: {json.dumps(update)}\n\n"
+
 
         # Send completion event
         yield f"data: {json.dumps({'type': 'complete', 'full_response': full_response})}\n\n"

@@ -616,6 +616,53 @@
                 height: 50px;
             }
         }
+
+        /* Feedback questions styles */
+        .feedback-questions {
+            background: #171717;
+            border: 1px solid #2d2d2d;
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 24px;
+            max-width: 768px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .feedback-questions-header {
+            color: #e1e1e1;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        .feedback-question-item {
+            background: #2d2d2d;
+            border: 1px solid #4d4d4d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #e1e1e1;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .feedback-question-item:hover {
+            background: #3d3d3d;
+            border-color: #10a37f;
+        }
+
+        .feedback-question-item:last-child {
+            margin-bottom: 0;
+        }
+
+        @media (max-width: 768px) {
+            .feedback-questions {
+                margin: 16px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -803,6 +850,59 @@
             }
         }
 
+        function handleFeedbackQuestions(questions) {
+            if (!questions || questions.length === 0) {
+                return;
+            }
+
+            // Remove any existing feedback questions
+            const existingFeedback = document.querySelector('.feedback-questions');
+            if (existingFeedback) {
+                existingFeedback.remove();
+            }
+
+            // Create feedback questions container
+            const feedbackContainer = document.createElement('div');
+            feedbackContainer.className = 'feedback-questions';
+
+            const header = document.createElement('div');
+            header.className = 'feedback-questions-header';
+            header.textContent = 'Follow-up questions:';
+            feedbackContainer.appendChild(header);
+
+            // Add each question as a clickable item
+            questions.forEach(question => {
+                const questionItem = document.createElement('div');
+                questionItem.className = 'feedback-question-item';
+                questionItem.textContent = question;
+                questionItem.onclick = () => sendFeedbackQuestion(question);
+                feedbackContainer.appendChild(questionItem);
+            });
+
+            // Insert feedback questions after the last message
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.appendChild(feedbackContainer);
+            scrollToBottom();
+        }
+
+        async function sendFeedbackQuestion(question) {
+            // Remove feedback questions when one is selected
+            const feedbackContainer = document.querySelector('.feedback-questions');
+            if (feedbackContainer) {
+                feedbackContainer.remove();
+            }
+
+            // Send the question as a new message
+            if (isStreaming) return;
+
+            const messageInput = document.getElementById('messageInput');
+            messageInput.value = question;
+
+            // Trigger the send message function
+            const event = new Event('submit');
+            document.querySelector('.chat-input-form').dispatchEvent(event);
+        }
+
         function toggleConfidenceMeter() {
             const meter = document.getElementById('confidenceMeter');
             const content = document.getElementById('confidenceContent');
@@ -886,6 +986,12 @@
             // Clear any existing messages
             const existingMessages = chatMessages.querySelectorAll('.message-wrapper');
             existingMessages.forEach(msg => msg.remove());
+
+            // Clear any existing feedback questions
+            const existingFeedback = document.querySelector('.feedback-questions');
+            if (existingFeedback) {
+                existingFeedback.remove();
+            }
 
             // Show welcome message
             chatMessages.classList.remove('has-messages');
@@ -1009,6 +1115,12 @@
                 const existingMessages = chatMessages.querySelectorAll('.message-wrapper');
                 existingMessages.forEach(msg => msg.remove());
 
+                // Clear any existing feedback questions
+                const existingFeedback = document.querySelector('.feedback-questions');
+                if (existingFeedback) {
+                    existingFeedback.remove();
+                }
+
                 if (data.messages.length === 0) {
                     chatMessages.classList.remove('has-messages');
                     welcomeMessage.style.display = 'block';
@@ -1039,6 +1151,12 @@
             const message = messageInput.value.trim();
 
             if (!message) return;
+
+            // Clear any existing feedback questions when sending a new message
+            const existingFeedback = document.querySelector('.feedback-questions');
+            if (existingFeedback) {
+                existingFeedback.remove();
+            }
 
             // Ensure we have a thread (create provisional if needed)
             const threadId = await ensureThreadExists();
@@ -1090,6 +1208,11 @@
                                     // Handle confidence updates from the chat stream
                                     if (data.thread_id === currentThreadId || data.thread_id === threadId) {
                                         handleConfidenceUpdate(data);
+                                    }
+                                } else if (data.type === 'feedback_questions') {
+                                    // Handle feedback questions
+                                    if (data.thread_id === currentThreadId || data.thread_id === threadId) {
+                                        handleFeedbackQuestions(data.feedback_questions);
                                     }
                                 } else if (data.type === 'complete') {
                                     assistantMessage.classList.remove('streaming');

@@ -48,6 +48,7 @@ async def calculate_contrast(state: GraphState) -> GraphState:
 
 async def evaluate_relevance(state: GraphState) -> GraphState:
     """Evaluate how relevant each response is to the user input."""
+    print("evaluate_relevance")
 
     relevance_prompt = f"""Given the user's question and a response, rate how relevant the response is on a scale of 0 to 1.
     A score of 1 means the response perfectly answers the question, while 0 means it's completely irrelevant.
@@ -76,6 +77,7 @@ async def evaluate_relevance(state: GraphState) -> GraphState:
 
 async def calculate_confidence(state: GraphState) -> GraphState:
     """Calculate final confidence score based on similarity and relevance."""
+    print('calculate_confidence')
     contrast_score = state['contrast_score']
     
     # Average relevance score
@@ -84,6 +86,6 @@ async def calculate_confidence(state: GraphState) -> GraphState:
     # Calculate confidence score
     # We weight both factors equally, but you can adjust the weights
     confidence = (contrast_score + avg_relevance) / 2
-    
+    print(f'Confidence: {confidence}')
     state['confidence_score'] = float(confidence)
     return state

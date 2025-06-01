@@ -65,6 +65,7 @@ async def generate_single_response(messages: list[BaseMessage], model: str, prom
 
 async def generate_responses(state: GraphState) -> GraphState:
   """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
+  print('generate_responses')
 
   user_input = state["messages"][-1].content
   # prompt_configs = [
@@ -94,6 +95,7 @@ async def generate_responses(state: GraphState) -> GraphState:
 
 async def generate_feedback_questions(state: GraphState) -> GraphState:
   """Jinja2 Template Processing -> LLM Analysis -> Feedback Generation"""
+  print('generate_feedback_questions')
   client = AsyncOpenAI(api_key=settings.openai_api_key or os.environ.get("OPENAI_API_KEY"))
   env = Environment(loader=FileSystemLoader('.'))
   template = env.get_template('feedback-question-generator.md')
@@ -123,16 +125,20 @@ async def generate_feedback_questions(state: GraphState) -> GraphState:
   )
   try:
     feedback_data = json.loads(response.choices[0].message.content)
-    state["feedback_questions"] = feedback_data
+    feedback_str = "\n\n".join([question["question"] for question in feedback_data["feedback_questions"]])
+    return {
+      "feedback_questions": feedback_data,
+      "messages": [AIMessage(content=feedback_str)]
+    }
   except json.JSONDecodeError:
     logger.error("JSON parsing failed")
-    state["feedback_questions"] = {"error": "Generation failed"}
-
-  return state
-
+    return {
+      "feedback_questions": {"error": "Generation failed"}
+    }
 # Graph Construction
 def create_response_graph(checkpointer=None):
   """Graph Assembly -> Single Node -> Multi-Response Generator"""
+  print('create_response_graph')
   workflow = StateGraph(GraphState)
   # Single processing node
   workflow.add_node("generate_responses", generate_responses)
@@ -150,33 +156,6 @@ def create_response_graph(checkpointer=None):
   workflow.add_edge("calculate_confidence", "generate_feedback_questions")
 
   workflow.set_finish_point("generate_feedback_questions")
-
-  return workflow.compile(checkpointer=checkpointer)
-
-# Simple chat function for streaming web interface
-async def simple_chat_response(state: GraphState) -> GraphState:
-  """Simple chat response for streaming interface"""
-
-  # Use the first (primary) model for chat responses
-  llm = init_chat_model(model="openai:gpt-4o-mini", api_key=openai_api_key, temperature=0.3)
-  response = await llm.ainvoke(state["messages"])
-
-  # Update state with the response
-  state["messages"].append(response)
-  state["confidence_score"] = 0.8  # Default confidence for simple chat
-
-  return state
-
-def create_simple_chat_graph(checkpointer):
-  """Simple chat graph for streaming responses"""
-  workflow = StateGraph(GraphState)
-
-  # Single chat node
-  workflow.add_node("chat", simple_chat_response)
-
-  # Simple flow
-  workflow.set_entry_point("chat")
-  workflow.set_finish_point("chat")
 
   return workflow.compile(checkpointer=checkpointer)
 
