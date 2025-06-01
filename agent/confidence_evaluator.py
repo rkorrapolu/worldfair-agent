@@ -42,8 +42,9 @@ async def calculate_contrast(state: GraphState) -> GraphState:
     
     score = response.contrast_score
     
-    state['contrast_score'] = score
-    return state
+    return {
+        'contrast_score': score
+    }
 
 async def evaluate_relevance(state: GraphState) -> GraphState:
     """Evaluate how relevant each response is to the user input."""
@@ -69,8 +70,9 @@ async def evaluate_relevance(state: GraphState) -> GraphState:
     
     scores = response.relevance_scores
     
-    state['relevance_scores'] = scores
-    return state
+    return {
+        'relevance_scores': scores
+    }
 
 async def calculate_confidence(state: GraphState) -> GraphState:
     """Calculate final confidence score based on similarity and relevance."""

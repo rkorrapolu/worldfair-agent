@@ -1,16 +1,8 @@
 import asyncio
-import json
 import os
-import asyncio
-from typing import Dict
+from typing import cast, Dict
 
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.text import Text
 
-import numpy as np
-from openai import AsyncOpenAI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from langgraph.graph import StateGraph
@@ -19,8 +11,23 @@ from state import GraphState
 from setup_logger import initialize_logger
 from confidence_evaluator import calculate_contrast, calculate_confidence, evaluate_relevance
 from dotenv import load_dotenv
+from langchain_core.messages import BaseMessage, AIMessage
+from langchain.chat_models import init_chat_model
+
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+
+import numpy as np
+
+
+
 
 load_dotenv()
+
+openai_api_key=os.environ.get("OPENAI_API_KEY")
+
 
 # Configuration
 class Settings(BaseSettings):
@@ -47,6 +54,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 logger = initialize_logger(__name__, settings.is_development, settings.log_level)
+
 
 def display_results(output: Dict):
   """Performance Visualization -> Structured Analytics Display"""
@@ -117,40 +125,31 @@ def display_results(output: Dict):
 
   console.print(analytics_table)
 
-async def generate_single_response(client: AsyncOpenAI, prompt: str, temperature: float) -> str:
+async def generate_single_response(messages: list[BaseMessage], temperature: float) -> AIMessage:
   """Single Response Generation -> Confidence Scoring"""
 
-  response = await client.chat.completions.create(
-    model="gpt-4.1",
-    messages=[{"role": "user", "content": prompt}],
-    temperature=temperature,
-    max_tokens=200
-  )
+  llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key, temperature=temperature)
 
-  content = response.choices[0].message.content
+  response = await llm.ainvoke(messages)
 
-  return content or ""
+  return cast("AIMessage", response)
+
 
 async def generate_responses(state: GraphState) -> GraphState:
   """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
 
-  client = AsyncOpenAI(api_key=settings.genai_openai_api_key or os.environ.get("OPENAI_API_KEY"))
-  user_query = state["user_input"]
-
-  # Generate 3 diverse responses
-  prompt_configs = [
-    (f"Provide a comprehensive answer: {user_query}", 0.1),
-    (f"Give a concise, practical response: {user_query}", 0.4),
-    (f"Offer an innovative perspective: {user_query}", 0.7)
-  ]
+  
+  user_input = state["messages"][-1].content
 
   # Parallel execution
   tasks = [
-    generate_single_response(client, prompt, temp)
-    for prompt, temp in prompt_configs
+    generate_single_response(state["messages"], temp)
+    for temp in [0.1, 0.4, 0.7]
   ]
   responses = await asyncio.gather(*tasks)
-  state["responses"] = responses
+  state["responses"] = [response.content for response in responses]
+  state["messages"].append(responses[0])
+  state["user_input"] = user_input
   return state
 
 # Graph Construction
@@ -166,11 +165,14 @@ def create_response_graph(checkpointer):
   # Graph flow
   workflow.set_entry_point("generate_responses")
   workflow.add_edge("generate_responses", "evaluate_relevance")
-  workflow.add_edge("evaluate_relevance", "calculate_contrast")
+  workflow.add_edge("generate_responses", "calculate_contrast")
+  workflow.add_edge("evaluate_relevance", "calculate_confidence")
   workflow.add_edge("calculate_contrast", "calculate_confidence")
+
   workflow.set_finish_point("calculate_confidence")
 
   return workflow.compile(checkpointer=checkpointer)
+
 
 # Execution Framework
 async def run_analysis(user_input: str) -> Dict:

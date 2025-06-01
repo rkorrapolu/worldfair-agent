@@ -1,7 +1,7 @@
-from typing import List, TypedDict
+from typing import List
+from langgraph.graph import MessagesState
 
-
-class GraphState(TypedDict):
+class GraphState(MessagesState):
   user_input: str
   responses: List[str]
   confidence_score: float
