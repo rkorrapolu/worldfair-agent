@@ -157,10 +157,10 @@ def create_response_graph(checkpointer=None):
   workflow = StateGraph(GraphState)
   # Single processing node
   workflow.add_node("generate_responses", generate_responses)
+  workflow.add_node("evaluate_universal_metic", evaluate_universal_metic)
   workflow.add_node("evaluate_relevance", evaluate_relevance)
   workflow.add_node("calculate_contrast", calculate_contrast)
   workflow.add_node("calculate_confidence", calculate_confidence)
-  workflow.add_node("evaluate_universal_metic", evaluate_universal_metic)
   workflow.add_node("generate_feedback_questions", generate_feedback_questions)
 
   # Graph flow
