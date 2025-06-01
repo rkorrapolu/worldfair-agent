@@ -22,7 +22,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-from confidence_evaluator import calculate_contrast, calculate_confidence, evaluate_relevance
+from confidence_evaluator import calculate_contrast, calculate_confidence, evaluate_relevance, evaluate_universal_metic
 
 load_dotenv()
 openai_api_key = os.environ.get("OPENAI_API_KEY")
@@ -112,7 +112,8 @@ async def generate_feedback_questions(state: GraphState) -> GraphState:
     'relevance_3': state["relevance_scores"][2] if len(state.get("relevance_scores", [])) > 2 else 0.0,
     'contrast_score': state.get("contrast_score", 0.0),
     'avg_relevance': np.mean(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0,
-    'peak_relevance': max(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0
+    'peak_relevance': max(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0,
+    'universal-eval': state["universal_eval"],
   }
   filled_template = template.render(template_data)
 
@@ -145,15 +146,18 @@ def create_response_graph(checkpointer=None):
   workflow.add_node("evaluate_relevance", evaluate_relevance)
   workflow.add_node("calculate_contrast", calculate_contrast)
   workflow.add_node("calculate_confidence", calculate_confidence)
+  workflow.add_node("evaluate_universal_metic", evaluate_universal_metic)
   workflow.add_node("generate_feedback_questions", generate_feedback_questions)
 
   # Graph flow
   workflow.set_entry_point("generate_responses")
+  workflow.add_edge("generate_responses", "evaluate_universal_metic")
   workflow.add_edge("generate_responses", "evaluate_relevance")
   workflow.add_edge("generate_responses", "calculate_contrast")
   workflow.add_edge("calculate_contrast", "calculate_confidence")
   workflow.add_edge("evaluate_relevance", "calculate_confidence")
   workflow.add_edge("calculate_confidence", "generate_feedback_questions")
+  workflow.add_edge("evaluate_universal_metic", "generate_feedback_questions")
 
   workflow.set_finish_point("generate_feedback_questions")
 

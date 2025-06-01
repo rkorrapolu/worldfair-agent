@@ -68,6 +68,16 @@ class ChatLangGraph:
         config = RunnableConfig(configurable={"thread_id": thread_id})
         state = self.graph.get_state(config)
         return state.values.get("confidence_score", 1.0)
+    
+    def get_thread_universal_metric(self, thread_id: str) -> dict:
+        """Get confidence score for a thread."""
+        if thread_id not in self.active_threads:
+            raise KeyError(f"Thread {thread_id} not found")
+
+        # Get the latest state from the graph
+        config = RunnableConfig(configurable={"thread_id": thread_id})
+        state = self.graph.get_state(config)
+        return state.values.get("universal_eval", {})
 
     def get_thread_messages(self, thread_id: str) -> list:
         """Get conversation history for a thread."""
@@ -290,6 +300,17 @@ async def get_thread_confidence(
     try:
         confidence = bot.get_thread_confidence(thread_id)
         return {"confidence": confidence, "thread_id": thread_id}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    
+@app.get("/api/threads/{thread_id}/uiversal_metric_key")
+async def get_thread_universal_metric(
+    thread_id: str, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
+):
+    """Get current confidence score for a specific thread."""
+    try:
+        uiversal_metric = bot.get_thread_universal_metric(thread_id)
+        return {**uiversal_metric, "thread_id": thread_id}
     except KeyError:
         raise HTTPException(status_code=404, detail="Thread not found")
 
