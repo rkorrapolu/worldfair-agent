@@ -519,6 +519,7 @@
             cursor: pointer;
             font-size: 14px;
             padding: 2px;
+            display: none;
         }
 
         .confidence-minimize:hover {
@@ -745,21 +746,21 @@
 
         <div class="chat-messages" id="chatMessages">
             <div class="welcome-message" id="welcomeMessage">
-                <h2>How can I help you today?</h2>
-                <p>Start a conversation with your LangGraph-powered assistant.</p>
+                <h2>Hello. Ask me a challenging question.</h2>
+                <p>Set your expected level of response consistency to match the nature of your question.</p>
 
                 <div class="welcome-suggestions" id="welcomeSuggestions">
-                    <div class="suggestion-card" onclick="sendSuggestion('Hello, how are you?')">
-                        <div class="suggestion-title">Hello, how are you?</div>
-                        <div class="suggestion-desc">Start with a simple greeting</div>
+                    <div class="suggestion-card" onclick="sendSuggestion('Where is the location of 2025 AI Engineer World\'s Fair Agents Hackathon in SF?')">
+                        <div class="suggestion-title">Where is the location of 2025 AI Engineer World's Fair Agents Hackathon in SF?</div>
+                        <div class="suggestion-desc">Ask about the location of something the assistant not aware of.</div>
                     </div>
-                    <div class="suggestion-card" onclick="sendSuggestion('What can you help me with?')">
-                        <div class="suggestion-title">What can you help me with?</div>
-                        <div class="suggestion-desc">Learn about the assistant's capabilities</div>
+                    <div class="suggestion-card" onclick="sendSuggestion('Who was the first president of the United States?')">
+                        <div class="suggestion-title">Who was the first president of the United States?</div>
+                        <div class="suggestion-desc">Ask about something the assistant is very certain about the answer to.</div>
                     </div>
-                    <div class="suggestion-card" onclick="sendSuggestion('Tell me a joke')">
-                        <div class="suggestion-title">Tell me a joke</div>
-                        <div class="suggestion-desc">Ask for something fun and entertaining</div>
+                    <div class="suggestion-card" onclick="sendSuggestion('How much wood could a wood chuck chuck if a wood chuck could chuck wood?')">
+                        <div class="suggestion-title">How much wood could a wood chuck chuck if a wood chuck could chuck wood?</div>
+                        <div class="suggestion-desc">Learn about important nature facts.</div>
                     </div>
                 </div>
             </div>
@@ -793,7 +794,7 @@
         <div class="confidence-content" id="confidenceContent">
             <div class="confidence-score">
                 <div class="confidence-value" id="confidenceValue">--</div>
-                <div class="confidence-label">Response Integrity</div>
+                <div class="confidence-label">Response Consistency</div>
             </div>
 
             <div class="confidence-bar-container">
@@ -1187,7 +1188,7 @@
             try {
                 const response = await fetch(`/api/threads/${threadId}/confidence`);
                 const data = await response.json();
-                
+
                 // Update the confidence display with the thread's current confidence
                 updateConfidenceDisplay(data.confidence);
                 updateConfidenceStatus(`Thread confidence loaded: ${Math.round(data.confidence * 100)}%`);

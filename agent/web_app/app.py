@@ -45,8 +45,7 @@ class ChatLangGraph:
         self.active_threads[thread_id] = {
             "title": f"Chat {len(self.active_threads) + 1}",
             "created_at": datetime.now(),
-            "message_count": 0,
-            "confidence_score": 1.0,
+            "message_count": 0
         }
         return thread_id
 
