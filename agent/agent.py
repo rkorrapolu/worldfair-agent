@@ -102,15 +102,13 @@ async def generate_feedback_questions(state: GraphState) -> GraphState:
   }
   filled_template = template.render(template_data)
 
-  # LLM Processing
+  # LLM processing
   response = await client.chat.completions.create(
     model="gpt-4.1",
     messages=[{"role": "user", "content": filled_template}],
     temperature=0.3,
     max_tokens=800
   )
-
-  # JSON Response Parsing
   try:
     feedback_data = json.loads(response.choices[0].message.content)
     state["feedback_questions"] = feedback_data
@@ -139,35 +137,33 @@ def create_response_graph(checkpointer):
   workflow.add_edge("calculate_confidence", "generate_feedback_questions")
   workflow.set_finish_point("generate_feedback_questions")
 
-  workflow.set_finish_point("calculate_confidence")
-
   return workflow.compile(checkpointer=checkpointer)
 
 # Simple chat function for streaming web interface
 async def simple_chat_response(state: GraphState) -> GraphState:
   """Simple chat response for streaming interface"""
-  
+
   # Use the first (primary) model for chat responses
   llm = init_chat_model(model="openai:gpt-4o-mini", api_key=openai_api_key, temperature=0.3)
   response = await llm.ainvoke(state["messages"])
-  
+
   # Update state with the response
   state["messages"].append(response)
   state["confidence_score"] = 0.8  # Default confidence for simple chat
-  
+
   return state
 
 def create_simple_chat_graph(checkpointer):
   """Simple chat graph for streaming responses"""
   workflow = StateGraph(GraphState)
-  
+
   # Single chat node
   workflow.add_node("chat", simple_chat_response)
-  
+
   # Simple flow
   workflow.set_entry_point("chat")
   workflow.set_finish_point("chat")
-  
+
   return workflow.compile(checkpointer=checkpointer)
 
 # ---------------
@@ -178,7 +174,7 @@ def display_results(output: Dict):
   """Performance Visualization -> Structured Analytics Display"""
   console = Console()
 
-  # Query Header
+  # Query header
   query_panel = Panel(
     Text(output["query"], style="bold cyan"),
     title="[bold]Query Analysis[/bold]",
@@ -188,7 +184,7 @@ def display_results(output: Dict):
   console.print(query_panel)
   console.print()
 
-  # Response Analysis Table
+  # Response analysis table
   response_table = Table(
     title="Response Generation Framework",
     show_header=True,
@@ -220,7 +216,7 @@ def display_results(output: Dict):
   console.print(response_table)
   console.print()
 
-  # Performance Analytics Table
+  # Performance analytics table
   analytics_table = Table(
     title="Performance Analytics Dashboard",
     show_header=True,
@@ -247,7 +243,7 @@ def display_feedback_questions(feedback_data: Dict):
   """Feedback Visualization -> Structured Question Display"""
   console = Console()
 
-  # Analysis Summary
+  # Analysis summary
   summary_panel = Panel(
     Text(f"Intent: {feedback_data.get('analysis_summary', {}).get('primary_intent', 'Unknown')}", style="bold cyan"),
     title="[bold]Analysis Summary[/bold]",
@@ -256,7 +252,7 @@ def display_feedback_questions(feedback_data: Dict):
   console.print(summary_panel)
   console.print()
 
-  # Feedback Questions Table
+  # Feedback questions table
   questions_table = Table(
     title="Generated Feedback Questions",
     show_header=True,
@@ -279,7 +275,7 @@ def display_feedback_questions(feedback_data: Dict):
 # MIAN LOOP
 # ---------
 
-# Execution Framework
+# Execution framework
 async def run_analysis(user_input: str) -> Dict:
   """Input Processing -> Response Generation -> Confidence Assessment"""
   graph = create_response_graph(None)
