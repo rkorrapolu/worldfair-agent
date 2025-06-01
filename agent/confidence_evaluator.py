@@ -98,7 +98,7 @@ Make sure you ask the judge LLM to output a score from 0-1 for the instrucrted m
     ]
     
     meta_llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(UniversalMetaEvaluatorOutput)
-    meta_response = cast("UniversalMetaEvaluatorOutput", meta_llm.invoke(messages))
+    meta_response = cast("UniversalMetaEvaluatorOutput", await meta_llm.ainvoke(messages))
 
     llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(UniversalEvaluatorOutput)
     content= f"""
@@ -111,7 +111,7 @@ Responses to evaluate:
         SystemMessage(content=meta_response.eval_prompt),
         HumanMessage(content=content)
     ]
-    response = cast("UniversalEvaluatorOutput", llm.invoke(messages))
+    response = cast("UniversalEvaluatorOutput", await llm.ainvoke(messages))
         
         
     metric_score = np.mean(response.scores) if response.scores else 0.0
