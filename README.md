@@ -135,6 +135,10 @@ graph LR
   style MongoDB fill:#e1f5fe
 ```
 
+#### LangGraph Nodes
+
+<img src="./agent/graph.png" width=450 alt="LangGraph StateGraph" />
+
 - GPT-4/Claude for response generation
 - Separate model instance for evaluation tasks
 - Log probability extraction and normalization
