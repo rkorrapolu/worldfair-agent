@@ -22,6 +22,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.checkpoint.memory import MemorySaver
 
 load_dotenv()
 
@@ -32,7 +33,8 @@ class ChatState(TypedDict):
 
 class ChatLangGraph:
     def __init__(self):
-        self.graph: CompiledStateGraph = create_response_graph() # type: ignore
+        self.checkpointer = MemorySaver()
+        self.graph: CompiledStateGraph = create_response_graph(checkpointer=self.checkpointer) # type: ignore
         self.active_threads = {}
 
     def create_new_thread(self) -> str:
@@ -104,21 +106,16 @@ class ChatLangGraph:
         config = RunnableConfig(configurable={"thread_id": thread_id})
 
         # Use LangGraph's built-in async streaming to get real-time updates
-        try:
-            async for chunk in self.graph.astream(input_data, config=config, stream_mode="values"):
-                # Check if there are new messages in the state
-                if "messages" in chunk and chunk["messages"]:
-                    # Get the latest AI message
-                    latest_message = chunk["messages"][-1]
-                    if hasattr(latest_message, 'content') and latest_message.content:
-                        # Yield the content
-                        yield latest_message.content
-                        break
+        async for chunk in self.graph.astream(input_data, config=config, stream_mode="values"):
+            # Check if there are new messages in the state
+            if "messages" in chunk and chunk["messages"]:
+                # Get the latest AI message
+                latest_message = chunk["messages"][-1]
+                if hasattr(latest_message, 'content') and latest_message.content:
+                    # Yield the content
+                    yield latest_message.content
+                    break
 
-        except Exception as e:
-            yield f"I apologize, but I encountered an error: {str(e)}"
-
-        # Update thread metadata
         self.active_threads[thread_id]["message_count"] += 2  # Human + AI message
 
     async def astream_confidence(self, thread_id: str) -> AsyncGenerator[dict, None]:
