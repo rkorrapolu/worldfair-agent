@@ -143,6 +143,33 @@ def create_response_graph(checkpointer):
 
   return workflow.compile(checkpointer=checkpointer)
 
+# Simple chat function for streaming web interface
+async def simple_chat_response(state: GraphState) -> GraphState:
+  """Simple chat response for streaming interface"""
+  
+  # Use the first (primary) model for chat responses
+  llm = init_chat_model(model="openai:gpt-4o-mini", api_key=openai_api_key, temperature=0.3)
+  response = await llm.ainvoke(state["messages"])
+  
+  # Update state with the response
+  state["messages"].append(response)
+  state["confidence_score"] = 0.8  # Default confidence for simple chat
+  
+  return state
+
+def create_simple_chat_graph(checkpointer):
+  """Simple chat graph for streaming responses"""
+  workflow = StateGraph(GraphState)
+  
+  # Single chat node
+  workflow.add_node("chat", simple_chat_response)
+  
+  # Simple flow
+  workflow.set_entry_point("chat")
+  workflow.set_finish_point("chat")
+  
+  return workflow.compile(checkpointer=checkpointer)
+
 # ---------------
 # OUTPUT HELPERS
 # ---------------

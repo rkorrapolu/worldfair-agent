@@ -719,17 +719,14 @@
         let isStreaming = false;
         let provisionalThreadId = null;
 
-        // Confidence meter variables
-        let confidenceEventSource = null;
-        let currentConfidence = 0;
-        let currentThreshold = 0.7;
-        let isConfidenceMinimized = false;
-
         // Load threads on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadThreads();
             setupTextareaAutoResize();
-            initializeConfidenceMeter();
+            // Initialize confidence meter
+            updateThresholdLine();
+            updateConfidenceStatus('Ready to chat');
+            updateConfidenceDisplay(1.0);
         });
 
         function setupTextareaAutoResize() {
@@ -741,80 +738,15 @@
             });
         }
 
-        function initializeConfidenceMeter() {
-            // Set initial threshold line position
-            updateThresholdLine();
-            updateConfidenceStatus('Select a thread to monitor confidence');
-
-            // Initialize with default confidence display
-            updateConfidenceDisplay(1.0);
-        }
-
-        function connectToConfidenceStream(threadId) {
-            if (confidenceEventSource) {
-                confidenceEventSource.close();
-            }
-
-            if (!threadId) {
-                updateConfidenceStatus('No active thread');
-                return;
-            }
-
-            updateConfidenceStatus('Connecting...');
-            confidenceEventSource = new EventSource(`/api/confidence/stream?thread_id=${threadId}`);
-
-            confidenceEventSource.onopen = function(event) {
-                updateConfidenceStatus('Connected - waiting for updates');
-            };
-
-            confidenceEventSource.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleConfidenceUpdate(data);
-                } catch (error) {
-                    console.error('Error parsing confidence data:', error);
-                }
-            };
-
-            confidenceEventSource.onerror = function(event) {
-                console.error('Confidence stream error:', event);
-
-                if (confidenceEventSource.readyState === EventSource.CLOSED) {
-                    updateConfidenceStatus('Connection closed');
-                } else {
-                    updateConfidenceStatus('Connection error - retrying...');
-
-                    // Reconnect after a delay
-                    setTimeout(() => {
-                        if (currentThreadId === threadId && confidenceEventSource.readyState === EventSource.CLOSED) {
-                            connectToConfidenceStream(threadId);
-                        }
-                    }, 5000);
-                }
-            };
-        }
+        // Confidence meter variables
+        let currentConfidence = 0;
+        let currentThreshold = 0.7;
+        let isConfidenceMinimized = false;
 
         function handleConfidenceUpdate(data) {
-            switch (data.type) {
-                case 'confidence_update':
-                    // Only update if this confidence update is for the current thread
-                    if (data.thread_id === currentThreadId) {
-                        updateConfidenceDisplay(data.confidence);
-                        updateConfidenceStatus(`Updated: ${new Date().toLocaleTimeString()}`);
-                    }
-                    break;
-
-                case 'ping':
-                    updateConfidenceStatus('Connected - listening');
-                    break;
-
-                case 'error':
-                    console.error('Confidence stream error:', data.message);
-                    updateConfidenceStatus(`Error: ${data.message}`);
-                    break;
-
-                default:
-                    console.log('Unknown confidence update type:', data.type);
+            if (data.type === 'confidence_update') {
+                updateConfidenceDisplay(data.confidence);
+                updateConfidenceStatus(`Updated: ${new Date().toLocaleTimeString()}`);
             }
         }
 
@@ -824,16 +756,24 @@
 
             // Update confidence value
             const confidenceValue = document.getElementById('confidenceValue');
-            confidenceValue.textContent = `${percentage}%`;
+            if (confidenceValue) {
+                confidenceValue.textContent = `${percentage}%`;
+            }
 
             // Update confidence bar
             const confidenceBar = document.getElementById('confidenceBar');
-            confidenceBar.style.width = `${percentage}%`;
+            if (confidenceBar) {
+                confidenceBar.style.width = `${percentage}%`;
+            }
 
-            // Update colors based on confidence level (using fixed threshold)
+            // Update colors based on confidence level
             const level = getConfidenceLevel(confidence);
-            confidenceValue.className = `confidence-value ${level}`;
-            confidenceBar.className = `confidence-bar ${level}`;
+            if (confidenceValue) {
+                confidenceValue.className = `confidence-value ${level}`;
+            }
+            if (confidenceBar) {
+                confidenceBar.className = `confidence-bar ${level}`;
+            }
 
             // Update threshold line position
             updateThresholdLine();
@@ -851,11 +791,16 @@
 
         function updateThresholdLine() {
             const thresholdLine = document.getElementById('confidenceThresholdLine');
-            thresholdLine.style.left = `${currentThreshold * 100}%`;
+            if (thresholdLine) {
+                thresholdLine.style.left = `${currentThreshold * 100}%`;
+            }
         }
 
         function updateConfidenceStatus(status) {
-            document.getElementById('confidenceStatus').textContent = status;
+            const statusElement = document.getElementById('confidenceStatus');
+            if (statusElement) {
+                statusElement.textContent = status;
+            }
         }
 
         function toggleConfidenceMeter() {
@@ -880,13 +825,6 @@
                 meter.onclick = null;
             }
         }
-
-        // Clean up event source when page unloads
-        window.addEventListener('beforeunload', function() {
-            if (confidenceEventSource) {
-                confidenceEventSource.close();
-            }
-        });
 
         async function loadThreads() {
             try {
@@ -954,14 +892,6 @@
             welcomeMessage.style.display = 'block';
 
             document.getElementById('currentThread').textContent = 'Start a new conversation';
-
-            // Disconnect from confidence stream and reset display
-            if (confidenceEventSource) {
-                confidenceEventSource.close();
-                confidenceEventSource = null;
-            }
-            updateConfidenceStatus('No active thread');
-            updateConfidenceDisplay(1.0); // Reset to default
         }
 
         function startNewChat() {
@@ -995,9 +925,6 @@
             if (window.innerWidth <= 768) {
                 toggleSidebar();
             }
-
-            // Connect to confidence stream for this thread
-            connectToConfidenceStream(threadId);
         }
 
         async function getThreadInfo(threadId) {
@@ -1159,6 +1086,11 @@
                                 if (data.type === 'token') {
                                     assistantMessage.textContent += data.content;
                                     scrollToBottom();
+                                } else if (data.type === 'confidence_update') {
+                                    // Handle confidence updates from the chat stream
+                                    if (data.thread_id === currentThreadId || data.thread_id === threadId) {
+                                        handleConfidenceUpdate(data);
+                                    }
                                 } else if (data.type === 'complete') {
                                     assistantMessage.classList.remove('streaming');
 
@@ -1167,9 +1099,6 @@
                                         currentThreadId = provisionalThreadId;
                                         provisionalThreadId = null;
                                         document.getElementById('currentThread').textContent = `Thread: ${currentThreadId}`;
-
-                                        // Connect to confidence stream for the new thread
-                                        connectToConfidenceStream(currentThreadId);
                                     }
 
                                     // Always reload threads to update message count in sidebar
