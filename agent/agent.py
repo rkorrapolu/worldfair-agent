@@ -3,6 +3,9 @@ import json
 import os
 import asyncio
 from typing import cast, Dict
+from langgraph.constants import (
+    END,
+)
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -135,6 +138,18 @@ async def generate_feedback_questions(state: GraphState) -> GraphState:
     return {
       "feedback_questions": {"error": "Generation failed"}
     }
+
+def conditional_feedback_or_end(state: GraphState) -> str:
+  """Conditional Feedback or End"""
+  print("conditional_feedback_or_end")
+  print(f"confidence_score: {state['confidence_score']}")
+  print(f"confidence_threshold: {state['confidence_threshold']}")
+
+  if state["confidence_score"] < state["confidence_threshold"]:
+    print("conditional to generate_feedback_questions")
+    return "generate_feedback_questions"
+  return END
+
 # Graph Construction
 def create_response_graph(checkpointer=None):
   """Graph Assembly -> Single Node -> Multi-Response Generator"""
@@ -153,8 +168,7 @@ def create_response_graph(checkpointer=None):
   workflow.add_edge("generate_responses", "calculate_contrast")
   workflow.add_edge("calculate_contrast", "calculate_confidence")
   workflow.add_edge("evaluate_relevance", "calculate_confidence")
-  workflow.add_edge("calculate_confidence", "generate_feedback_questions")
-
+  workflow.add_conditional_edges("calculate_confidence", conditional_feedback_or_end)
   workflow.set_finish_point("generate_feedback_questions")
 
   return workflow.compile(checkpointer=checkpointer)
