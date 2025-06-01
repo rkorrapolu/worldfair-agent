@@ -761,72 +761,27 @@
         }
 
         /* Universal metric styles */
-        .confidence-meter.universal-metric {
-            position: fixed;
-            top: 16px;
-            right: 320px;
-            background: #171717;
-            border: 1px solid #2d2d2d;
-            border-radius: 12px;
-            padding: 16px;
-            width: 280px;
-            z-index: 1001;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        .universal-metric-section {
+            margin-top: 20px;
         }
 
-        .confidence-meter.universal-metric.minimized {
-            width: 60px;
-            height: 60px;
-            padding: 8px;
-            overflow: hidden;
-            cursor: pointer;
-        }
-
-        .confidence-header.universal-metric {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-
-        .confidence-title.universal-metric {
-            font-weight: 600;
-            color: #e1e1e1;
-            font-size: 14px;
-        }
-
-        .confidence-minimize.universal-metric {
-            background: none;
-            border: none;
-            color: #8e8ea0;
-            cursor: pointer;
-            font-size: 14px;
-            padding: 2px;
-            display: none;
-        }
-
-        .confidence-minimize.universal-metric:hover {
-            color: #e1e1e1;
-        }
-
-        .confidence-score.universal-metric {
+        .confidence-score {
             text-align: center;
             margin-bottom: 16px;
         }
 
-        .confidence-value.universal-metric {
+        .confidence-value {
             font-size: 24px;
             font-weight: 700;
             margin-bottom: 4px;
         }
 
-        .confidence-label.universal-metric {
+        .confidence-label {
             font-size: 12px;
             color: #8e8ea0;
         }
 
-        .confidence-bar-container.universal-metric {
+        .confidence-bar-container {
             position: relative;
             height: 8px;
             background: #2d2d2d;
@@ -835,50 +790,30 @@
             overflow: hidden;
         }
 
-        .confidence-bar.universal-metric {
+        .confidence-bar {
             height: 100%;
             border-radius: 4px;
             transition: width 0.5s ease, background-color 0.3s ease;
         }
 
-        .confidence-bar.universal-metric.high {
+        .confidence-bar.high {
             background: linear-gradient(90deg, #10a37f, #0d8f6b);
         }
 
-        .confidence-bar.universal-metric.medium {
+        .confidence-bar.medium {
             background: linear-gradient(90deg, #f39c12, #e67e22);
         }
 
-        .confidence-bar.universal-metric.low {
+        .confidence-bar.low {
             background: linear-gradient(90deg, #e74c3c, #c0392b);
         }
 
-        .confidence-status.universal-metric {
+        .confidence-status {
             font-size: 11px;
             color: #8e8ea0;
             text-align: center;
             margin-top: 8px;
             min-height: 14px;
-        }
-
-        .confidence-mini-icon.universal-metric {
-            font-size: 20px;
-            text-align: center;
-            color: #8e8ea0;
-        }
-
-        /* Mobile responsive */
-        @media (max-width: 768px) {
-            .confidence-meter.universal-metric {
-                top: 8px;
-                right: 8px;
-                width: 250px;
-            }
-
-            .confidence-meter.universal-metric.minimized {
-                width: 50px;
-                height: 50px;
-            }
         }
     </style>
 </head>
@@ -975,37 +910,24 @@
             <div class="confidence-status" id="confidenceStatus">
                 Waiting for confidence updates...
             </div>
+
+            <!-- Universal Metric (inside the same card) -->
+            <div class="universal-metric-section" style="margin-top: 20px;">
+                <div class="confidence-score">
+                    <div class="confidence-value" id="universalMetricValue">--</div>
+                    <div class="confidence-label" id="universalMetricKey">No metric key</div>
+                </div>
+                <div class="confidence-bar-container">
+                    <div class="confidence-bar" id="universalMetricBar"></div>
+                </div>
+                <div class="confidence-status" id="universalMetricStatus">
+                    Waiting for metric updates...
+                </div>
+            </div>
         </div>
 
         <div class="confidence-mini-icon" id="confidenceMiniIcon" style="display: none;">
             📊
-        </div>
-    </div>
-
-    <!-- Universal Metric Display -->
-    <div class="confidence-meter universal-metric" id="universalMetric" style="right: 320px;">
-        <div class="confidence-header">
-            <div class="confidence-title">Universal Metric</div>
-            <button class="confidence-minimize" onclick="toggleUniversalMetric()">−</button>
-        </div>
-
-        <div class="confidence-content" id="universalMetricContent">
-            <div class="confidence-score">
-                <div class="confidence-value" id="universalMetricValue">--</div>
-                <div class="confidence-label" id="universalMetricKey">No metric key</div>
-            </div>
-
-            <div class="confidence-bar-container">
-                <div class="confidence-bar" id="universalMetricBar"></div>
-            </div>
-
-            <div class="confidence-status" id="universalMetricStatus">
-                Waiting for metric updates...
-            </div>
-        </div>
-
-        <div class="confidence-mini-icon" id="universalMetricMiniIcon" style="display: none;">
-            📈
         </div>
     </div>
 
@@ -1671,9 +1593,9 @@
         let isUniversalMetricMinimized = false;
 
         function toggleUniversalMetric() {
-            const meter = document.getElementById('universalMetric');
-            const content = document.getElementById('universalMetricContent');
-            const miniIcon = document.getElementById('universalMetricMiniIcon');
+            const meter = document.getElementById('confidenceMeter');
+            const content = document.getElementById('confidenceContent');
+            const miniIcon = document.getElementById('confidenceMiniIcon');
             const minimizeBtn = meter.querySelector('.confidence-minimize');
 
             isUniversalMetricMinimized = !isUniversalMetricMinimized;

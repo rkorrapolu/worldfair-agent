@@ -136,6 +136,8 @@ class ChatLangGraph:
             "messages": [HumanMessage(content=message)],
             "confidence_score": current_confidence,
             "confidence_threshold": current_confidence_threshold
+            "confidence_score": current_confidence,  # Use existing confidence instead of resetting
+            "universal_eval": {}
         }
 
         async for chunk in self.graph.astream(
