@@ -102,20 +102,9 @@ class ChatLangGraph:
         config = RunnableConfig(configurable={"thread_id": thread_id})
 
         async for chunk in self.graph.astream(input_data, config=config, stream_mode="values"):
-            if "messages" in chunk and chunk["messages"]:
-                latest_message = chunk["messages"][-1]
-                if hasattr(latest_message, 'content') and latest_message.content:
-                    yield {
-                        "type": "token",
-                        "content": latest_message.content,
-                    }
-
-            if "confidence_score" in chunk:
-                yield {
-                    "type": "confidence_update",
-                    "thread_id": thread_id,
-                    "confidence": chunk["confidence_score"],
-                }
+            # Yield raw chunks with thread_id for processing in generate_response
+            chunk["thread_id"] = thread_id
+            yield chunk
 
         self.active_threads[thread_id]["message_count"] += 2
 
@@ -262,14 +251,22 @@ async def chat_stream(
 
             full_response = ""
 
-            async for update in bot.aquery(chat_message.message, chat_message.thread_id):
-                if update["type"] == "token":
-                    content = update["content"]
-                    full_response += content
-                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+            async for chunk in bot.aquery(chat_message.message, chat_message.thread_id):
+                # Handle messages
+                if "messages" in chunk and chunk["messages"]:
+                    latest_message = chunk["messages"][-1]
+                    if hasattr(latest_message, 'content') and latest_message.content:
+                        content = latest_message.content
+                        full_response += content
+                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
-                elif update["type"] == "confidence_update":
-                    # Handle confidence updates
+                # Handle confidence updates
+                if "confidence_score" in chunk:
+                    update = {
+                        "type": "confidence_update",
+                        "thread_id": chunk["thread_id"],
+                        "confidence": chunk["confidence_score"],
+                    }
                     yield f"data: {json.dumps(update)}\n\n"
 
             # Send completion event
