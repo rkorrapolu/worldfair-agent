@@ -53,10 +53,11 @@ class Settings(BaseSettings):
 settings = Settings()
 logger = initialize_logger(__name__, settings.is_development, settings.log_level)
 
-async def generate_single_response(messages: list[BaseMessage], model: str, prompt: str, temperature: float) -> AIMessage:
+async def generate_single_response(messages: list[BaseMessage], model: str, prompt: str, temperature: float, no_stream: bool) -> AIMessage:
   """Single Response Generation -> Confidence Scoring"""
 
-  llm = init_chat_model(model=model, api_key=openai_api_key, temperature=temperature)
+  tags = ["no_stream"] if no_stream else None
+  llm = init_chat_model(model=model, api_key=openai_api_key, temperature=temperature, tags=tags)
   custom_messages = messages[:-1] + [HumanMessage(content=prompt)]
   response = await llm.ainvoke(custom_messages)
 
@@ -72,14 +73,14 @@ async def generate_responses(state: GraphState) -> GraphState:
   #   ("openai:gpt-4.1-nano", f"Offer an innovative perspective: {user_input}", 0.7)
   # ]
   prompt_configs = [
-    ("openai:gpt-4.1", user_input, 0.1),
-    ("openai:gpt-4.1-mini", user_input, 0.4),
-    ("openai:gpt-4.1-nano", user_input, 0.7)
+    ("openai:gpt-4.1", user_input, 0.1, False),
+    ("openai:gpt-4.1-mini", user_input, 0.4, True),
+    ("openai:gpt-4.1-nano", user_input, 0.7, True)
   ]
   # Parallel execution
   tasks = [
-    generate_single_response(state["messages"], model, prompt, temp)
-    for model, prompt, temp in prompt_configs
+    generate_single_response(state["messages"], model, prompt, temp, no_stream)
+    for model, prompt, temp, no_stream in prompt_configs
   ]
   responses = await asyncio.gather(*tasks)
 

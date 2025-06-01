@@ -26,6 +26,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 load_dotenv()
 
+
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     confidence_score: float
@@ -35,7 +36,7 @@ class ChatLangGraph:
     def __init__(self):
         self.checkpointer = MemorySaver()
         # Import the simple chat graph for streaming
-        self.graph: CompiledStateGraph = create_response_graph(checkpointer=self.checkpointer) # type: ignore
+        self.graph: CompiledStateGraph = create_response_graph(checkpointer=self.checkpointer)  # type: ignore
         self.active_threads = {}
 
     def create_new_thread(self) -> str:
@@ -87,7 +88,9 @@ class ChatLangGraph:
             raise KeyError(f"Thread {thread_id} not found")
         del self.active_threads[thread_id]
 
-    async def aquery(self, message: str, thread_id: str | None = None) -> AsyncGenerator[dict, None]:
+    async def aquery(
+        self, message: str, thread_id: str | None = None
+    ) -> AsyncGenerator[dict, None]:
         if thread_id and thread_id not in self.active_threads:
             raise KeyError(f"Thread {thread_id} not found")
 
@@ -101,10 +104,10 @@ class ChatLangGraph:
 
         config = RunnableConfig(configurable={"thread_id": thread_id})
 
-        async for chunk in self.graph.astream(input_data, config=config, stream_mode="values"):
-            # Yield raw chunks with thread_id for processing in generate_response
-            chunk["thread_id"] = thread_id
-            yield chunk
+        async for chunk in self.graph.astream(
+            input_data, config=config, stream_mode=["values", "messages"]
+        ):
+            yield {"chunk": chunk, "thread_id": thread_id}
 
         self.active_threads[thread_id]["message_count"] += 2
 
@@ -234,7 +237,7 @@ async def delete_thread(
     """Delete a conversation thread."""
     try:
         bot.delete_thread(thread_id)
-        return None  # 204 No Content
+        return None
     except KeyError:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -244,37 +247,33 @@ async def chat_stream(
     chat_message: ChatMessage, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
 ):
     """Stream chat response using Server-Sent Events."""
+    print("chat_stream")
 
     async def generate_response() -> AsyncGenerator[str, None]:
-        try:
-            yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
 
-            full_response = ""
+        full_response = ""
 
-            async for chunk in bot.aquery(chat_message.message, chat_message.thread_id):
-                # Handle messages
-                if "messages" in chunk and chunk["messages"]:
-                    latest_message = chunk["messages"][-1]
-                    if hasattr(latest_message, 'content') and latest_message.content:
-                        content = latest_message.content
-                        full_response += content
-                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+        async for chunk in bot.aquery(chat_message.message, chat_message.thread_id):
+            mode, data = chunk["chunk"]
 
-                # Handle confidence updates
-                if "confidence_score" in chunk:
-                    update = {
-                        "type": "confidence_update",
-                        "thread_id": chunk["thread_id"],
-                        "confidence": chunk["confidence_score"],
-                    }
-                    yield f"data: {json.dumps(update)}\n\n"
+            if mode == "messages" and isinstance(data, tuple) and data[1]["langgraph_node"] in ["generate_responses", "generate_feedback_questions"]:
+                
+                if not "no_stream" in data[1].get("tags",""):
+                    message_content = data[0].content
+                    full_response += message_content
+                    yield f"data: {json.dumps({'type': 'token', 'content': message_content})}\n\n"
 
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete', 'full_response': full_response})}\n\n"
+            elif mode == "values" and "confidence_score" in data:
+                update = {
+                    "type": "confidence_update",
+                    "thread_id": chunk["thread_id"],
+                    "confidence": data["confidence_score"],
+                }
+                yield f"data: {json.dumps(update)}\n\n"
 
-        except Exception as e:
-            # Send error event
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        # Send completion event
+        yield f"data: {json.dumps({'type': 'complete', 'full_response': full_response})}\n\n"
 
     return StreamingResponse(
         generate_response(),
