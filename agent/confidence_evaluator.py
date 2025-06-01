@@ -99,7 +99,7 @@ Make sure you ask the judge LLM to output a score from 0-1 for the instrucrted m
     ]
     
     meta_llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(UniversalMetaEvaluatorOutput)
-    meta_response = await cast("UniversalMetaEvaluatorOutput", await meta_llm.ainvoke(messages))
+    meta_response = await cast("UniversalMetaEvaluatorOutput", meta_llm.ainvoke(messages))
 
     llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key).with_structured_output(UniversalEvaluatorOutput)
     content= f"""
