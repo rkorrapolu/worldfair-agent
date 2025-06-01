@@ -82,10 +82,14 @@ async def generate_responses(state: GraphState) -> GraphState:
     for model, prompt, temp in prompt_configs
   ]
   responses = await asyncio.gather(*tasks)
-  state["responses"] = [response.content for response in responses]
-  state["messages"].append(responses[0])
-  state["user_input"] = user_input
-  return state
+
+  response_contents = [response.content for response in responses]
+
+  return {
+    "messages": [responses[0]],
+    "responses": response_contents,
+    "user_input": user_input
+  }
 
 async def generate_feedback_questions(state: GraphState) -> GraphState:
   """Jinja2 Template Processing -> LLM Analysis -> Feedback Generation"""

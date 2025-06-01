@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Annotated, TypedDict
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from agent import create_response_graph, create_simple_chat_graph
+from agent import create_response_graph
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,7 +35,7 @@ class ChatLangGraph:
     def __init__(self):
         self.checkpointer = MemorySaver()
         # Import the simple chat graph for streaming
-        self.graph: CompiledStateGraph = create_simple_chat_graph(checkpointer=self.checkpointer) # type: ignore
+        self.graph: CompiledStateGraph = create_response_graph(checkpointer=self.checkpointer) # type: ignore
         self.active_threads = {}
 
     def create_new_thread(self) -> str:
@@ -88,18 +88,12 @@ class ChatLangGraph:
         del self.active_threads[thread_id]
 
     async def aquery(self, message: str, thread_id: str | None = None) -> AsyncGenerator[dict, None]:
-        """
-        Async version of query that uses LangGraph's native async streaming.
-        Yields both chat content and confidence updates.
-        """
-        # Ensure thread exists
         if thread_id and thread_id not in self.active_threads:
             raise KeyError(f"Thread {thread_id} not found")
 
         if not thread_id:
             thread_id = self.create_new_thread()
 
-        # Use LangGraph implementation with async streaming
         input_data = {
             "messages": [HumanMessage(content=message)],
             "confidence_score": 1.0,
@@ -107,27 +101,23 @@ class ChatLangGraph:
 
         config = RunnableConfig(configurable={"thread_id": thread_id})
 
-        # Use messages mode to stream LLM tokens directly
-        async for chunk in self.graph.astream(input_data, config=config, stream_mode="messages"):
-            message_chunk, metadata = chunk
-            # Stream individual tokens from the LLM
-            if hasattr(message_chunk, 'content') and message_chunk.content:
-                yield {
-                    "type": "token",
-                    "content": message_chunk.content,
-                }
-
-        # Also get the final state for confidence updates
         async for chunk in self.graph.astream(input_data, config=config, stream_mode="values"):
+            if "messages" in chunk and chunk["messages"]:
+                latest_message = chunk["messages"][-1]
+                if hasattr(latest_message, 'content') and latest_message.content:
+                    yield {
+                        "type": "token",
+                        "content": latest_message.content,
+                    }
+
             if "confidence_score" in chunk:
                 yield {
                     "type": "confidence_update",
                     "thread_id": thread_id,
                     "confidence": chunk["confidence_score"],
                 }
-                break
 
-        self.active_threads[thread_id]["message_count"] += 2  # Human + AI message
+        self.active_threads[thread_id]["message_count"] += 2
 
 
 chatbot: ChatLangGraph | None = None
@@ -268,21 +258,16 @@ async def chat_stream(
 
     async def generate_response() -> AsyncGenerator[str, None]:
         try:
-            # Send initial event to indicate streaming started
             yield f"data: {json.dumps({'type': 'start'})}\n\n"
 
-            # Collect the full response for potential use
             full_response = ""
 
-            # Stream the response from the chatbot
             async for update in bot.aquery(chat_message.message, chat_message.thread_id):
                 if update["type"] == "token":
-                    # Handle individual LLM tokens - no need to break them down further
                     content = update["content"]
                     full_response += content
-                    # Send the token directly as received from LLM
                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
-                    
+
                 elif update["type"] == "confidence_update":
                     # Handle confidence updates
                     yield f"data: {json.dumps(update)}\n\n"
