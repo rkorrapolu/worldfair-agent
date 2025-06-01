@@ -1168,6 +1168,9 @@
             // Load thread history
             await loadThreadHistory(threadId);
 
+            // Fetch and update confidence for this thread
+            await loadThreadConfidence(threadId);
+
             // Close sidebar on mobile
             if (window.innerWidth <= 768) {
                 toggleSidebar();
@@ -1178,6 +1181,22 @@
             const response = await fetch('/api/threads');
             const data = await response.json();
             return data.threads.find(t => t.thread_id === threadId);
+        }
+
+        async function loadThreadConfidence(threadId) {
+            try {
+                const response = await fetch(`/api/threads/${threadId}/confidence`);
+                const data = await response.json();
+                
+                // Update the confidence display with the thread's current confidence
+                updateConfidenceDisplay(data.confidence);
+                updateConfidenceStatus(`Thread confidence loaded: ${Math.round(data.confidence * 100)}%`);
+            } catch (error) {
+                console.error('Error loading thread confidence:', error);
+                // Don't show error to user, just log it and use default
+                updateConfidenceDisplay(1.0);
+                updateConfidenceStatus('Unable to load confidence - using default');
+            }
         }
 
         async function deleteThread(event, threadId) {

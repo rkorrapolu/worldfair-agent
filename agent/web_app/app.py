@@ -111,12 +111,17 @@ class ChatLangGraph:
         if not thread_id:
             thread_id = self.create_new_thread()
 
+        # Get current confidence score from thread state instead of resetting to 1.0
+        config = RunnableConfig(configurable={"thread_id": thread_id})
+        current_state = self.graph.get_state(config)
+        current_confidence = 1.0  # Default for new threads
+        if current_state.values and "confidence_score" in current_state.values:
+            current_confidence = current_state.values["confidence_score"]
+
         input_data = {
             "messages": [HumanMessage(content=message)],
-            "confidence_score": 1.0,
+            "confidence_score": current_confidence,  # Use existing confidence instead of resetting
         }
-
-        config = RunnableConfig(configurable={"thread_id": thread_id})
 
         async for chunk in self.graph.astream(
             input_data, config=config, stream_mode=["values", "messages"]
@@ -278,6 +283,18 @@ async def update_confidence_threshold(
         raise HTTPException(status_code=404, detail="Thread not found")
 
 
+@app.get("/api/threads/{thread_id}/confidence")
+async def get_thread_confidence(
+    thread_id: str, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
+):
+    """Get current confidence score for a specific thread."""
+    try:
+        confidence = bot.get_thread_confidence(thread_id)
+        return {"confidence": confidence, "thread_id": thread_id}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(
     chat_message: ChatMessage, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
@@ -300,15 +317,15 @@ async def chat_stream(
                     yield f"data: {json.dumps({'type': 'token', 'content': message_content})}\n\n"
 
             elif mode == "values":
-                if "confidence_score" in data:
+                if isinstance(data, dict) and "confidence_score" in data:
                     update = {
                         "type": "confidence_update",
                         "thread_id": chunk["thread_id"],
                         "confidence": data["confidence_score"],
                     }
                     yield f"data: {json.dumps(update)}\n\n"
-                if "messages" in data:
-                    yield f"data: {json.dumps(update)}\n\n"
+                if isinstance(data, dict) and "messages" in data:
+                    yield f"data: {json.dumps({'type': 'messages_update'})}\n\n"
 
 
         # Send completion event
