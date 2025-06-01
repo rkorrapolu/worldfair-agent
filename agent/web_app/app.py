@@ -135,7 +135,7 @@ class ChatLangGraph:
         input_data = {
             "messages": [HumanMessage(content=message)],
             "confidence_score": current_confidence,
-            "confidence_threshold": current_confidence_threshold
+            "confidence_threshold": current_confidence_threshold,
             "confidence_score": current_confidence,  # Use existing confidence instead of resetting
             "universal_eval": {}
         }
