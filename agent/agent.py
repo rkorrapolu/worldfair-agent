@@ -1,16 +1,19 @@
 import asyncio
+import json
 import os
+import asyncio
 from typing import cast, Dict
-
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from langgraph.graph import StateGraph
+from jinja2 import Environment, FileSystemLoader
+from dotenv import load_dotenv
 
+import numpy as np
+from openai import AsyncOpenAI
 from state import GraphState
 from setup_logger import initialize_logger
-from confidence_evaluator import calculate_contrast, calculate_confidence, evaluate_relevance
-from dotenv import load_dotenv
+from langgraph.graph import StateGraph
 from langchain_core.messages import BaseMessage, AIMessage
 from langchain.chat_models import init_chat_model
 
@@ -19,15 +22,10 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-import numpy as np
-
-
-
+from confidence_evaluator import calculate_contrast, calculate_confidence, evaluate_relevance
 
 load_dotenv()
-
-openai_api_key=os.environ.get("OPENAI_API_KEY")
-
+openai_api_key = os.environ.get("OPENAI_API_KEY")
 
 # Configuration
 class Settings(BaseSettings):
@@ -42,7 +40,7 @@ class Settings(BaseSettings):
   environment: str = Field(default="local", env="ENVIRONMENT")
 
   # Agent configuration
-  genai_openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
+  openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
 
   # Logging
   log_level: str = "INFO"
@@ -55,6 +53,99 @@ class Settings(BaseSettings):
 settings = Settings()
 logger = initialize_logger(__name__, settings.is_development, settings.log_level)
 
+async def generate_single_response(messages: list[BaseMessage], model: str, temperature: float) -> AIMessage:
+  """Single Response Generation -> Confidence Scoring"""
+
+  llm = init_chat_model(model=model, api_key=openai_api_key, temperature=temperature)
+  response = await llm.ainvoke(messages)
+
+  return cast("AIMessage", response)
+
+async def generate_responses(state: GraphState) -> GraphState:
+  """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
+
+  user_input = state["messages"][-1].content
+  # Parallel execution
+  tasks = [
+    generate_single_response(state["messages"], model, temp)
+    for model, temp in [
+      ("openai:gpt-4.1", 0.1),
+      ("openai:gpt-4.1-mini", 0.1),
+      ("openai:gpt-4.1-nano", 0.1)
+    ]
+  ]
+  responses = await asyncio.gather(*tasks)
+  state["responses"] = [response.content for response in responses]
+  state["messages"].append(responses[0])
+  state["user_input"] = user_input
+  return state
+
+async def generate_feedback_questions(state: GraphState) -> GraphState:
+  """Jinja2 Template Processing -> LLM Analysis -> Feedback Generation"""
+  client = AsyncOpenAI(api_key=settings.openai_api_key or os.environ.get("OPENAI_API_KEY"))
+  env = Environment(loader=FileSystemLoader('.'))
+  template = env.get_template('feedback-question-generator.md')
+
+  # Template data structure
+  template_data = {
+    'user_input': state["user_input"],
+    'response_1': state["responses"][0] if len(state["responses"]) > 0 else "",
+    'response_2': state["responses"][1] if len(state["responses"]) > 1 else "",
+    'response_3': state["responses"][2] if len(state["responses"]) > 2 else "",
+    'confidence_score': state.get("confidence_score", 0.0),
+    'relevance_1': state["relevance_scores"][0] if len(state.get("relevance_scores", [])) > 0 else 0.0,
+    'relevance_2': state["relevance_scores"][1] if len(state.get("relevance_scores", [])) > 1 else 0.0,
+    'relevance_3': state["relevance_scores"][2] if len(state.get("relevance_scores", [])) > 2 else 0.0,
+    'contrast_score': state.get("contrast_score", 0.0),
+    'avg_relevance': np.mean(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0,
+    'peak_relevance': max(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0
+  }
+  filled_template = template.render(template_data)
+
+  # LLM Processing
+  response = await client.chat.completions.create(
+    model="gpt-4.1",
+    messages=[{"role": "user", "content": filled_template}],
+    temperature=0.3,
+    max_tokens=800
+  )
+
+  # JSON Response Parsing
+  try:
+    feedback_data = json.loads(response.choices[0].message.content)
+    state["feedback_questions"] = feedback_data
+  except json.JSONDecodeError:
+    logger.error("JSON parsing failed")
+    state["feedback_questions"] = {"error": "Generation failed"}
+
+  return state
+
+# Graph Construction
+def create_response_graph(checkpointer):
+  """Graph Assembly -> Single Node -> Multi-Response Generator"""
+  workflow = StateGraph(GraphState)
+  # Single processing node
+  workflow.add_node("generate_responses", generate_responses)
+  workflow.add_node("evaluate_relevance", evaluate_relevance)
+  workflow.add_node("calculate_contrast", calculate_contrast)
+  workflow.add_node("calculate_confidence", calculate_confidence)
+  workflow.add_node("generate_feedback_questions", generate_feedback_questions)
+
+  # Graph flow
+  workflow.set_entry_point("generate_responses")
+  workflow.add_edge("generate_responses", "evaluate_relevance")
+  workflow.add_edge("generate_responses", "calculate_contrast")
+  workflow.add_edge("evaluate_relevance", "calculate_confidence")
+  workflow.add_edge("calculate_confidence", "generate_feedback_questions")
+  workflow.set_finish_point("generate_feedback_questions")
+
+  workflow.set_finish_point("calculate_confidence")
+
+  return workflow.compile(checkpointer=checkpointer)
+
+# ---------------
+# OUTPUT HELPERS
+# ---------------
 
 def display_results(output: Dict):
   """Performance Visualization -> Structured Analytics Display"""
@@ -62,9 +153,9 @@ def display_results(output: Dict):
 
   # Query Header
   query_panel = Panel(
-      Text(output["query"], style="bold cyan"),
-      title="[bold]Query Analysis[/bold]",
-      border_style="blue"
+    Text(output["query"], style="bold cyan"),
+    title="[bold]Query Analysis[/bold]",
+    border_style="blue"
   )
   console.print()
   console.print(query_panel)
@@ -72,9 +163,9 @@ def display_results(output: Dict):
 
   # Response Analysis Table
   response_table = Table(
-      title="Response Generation Framework",
-      show_header=True,
-      header_style="bold magenta"
+    title="Response Generation Framework",
+    show_header=True,
+    header_style="bold magenta"
   )
 
   response_table.add_column("Index", style="dim", width=8)
@@ -94,9 +185,9 @@ def display_results(output: Dict):
       content = str(resp)
 
     response_table.add_row(
-        f"#{i + 1}",
-        f"[{relevance_color}]{relevance:.3f}[/{relevance_color}]",
-        content[:150] + "..." if len(content) > 150 else content
+      f"#{i + 1}",
+      f"[{relevance_color}]{relevance:.3f}[/{relevance_color}]",
+      content
     )
 
   console.print(response_table)
@@ -104,9 +195,9 @@ def display_results(output: Dict):
 
   # Performance Analytics Table
   analytics_table = Table(
-      title="Performance Analytics Dashboard",
-      show_header=True,
-      header_style="bold yellow"
+    title="Performance Analytics Dashboard",
+    show_header=True,
+    header_style="bold yellow"
   )
   analytics_table.add_column("Metric", style="cyan", width=25)
   analytics_table.add_column("Value", justify="center", style="white", width=15)
@@ -125,58 +216,41 @@ def display_results(output: Dict):
 
   console.print(analytics_table)
 
-async def generate_single_response(messages: list[BaseMessage], model: str, temperature: float) -> AIMessage:
-  """Single Response Generation -> Confidence Scoring"""
+def display_feedback_questions(feedback_data: Dict):
+  """Feedback Visualization -> Structured Question Display"""
+  console = Console()
 
-  llm = init_chat_model(model=model, api_key=openai_api_key, temperature=temperature)
+  # Analysis Summary
+  summary_panel = Panel(
+    Text(f"Intent: {feedback_data.get('analysis_summary', {}).get('primary_intent', 'Unknown')}", style="bold cyan"),
+    title="[bold]Analysis Summary[/bold]",
+    border_style="blue"
+  )
+  console.print(summary_panel)
+  console.print()
 
-  response = await llm.ainvoke(messages)
+  # Feedback Questions Table
+  questions_table = Table(
+    title="Generated Feedback Questions",
+    show_header=True,
+    header_style="bold magenta"
+  )
+  questions_table.add_column("Type", style="yellow", width=15)
+  questions_table.add_column("Question", style="white", width=60)
+  questions_table.add_column("Target", style="green", width=20)
 
-  return cast("AIMessage", response)
+  questions = feedback_data.get("feedback_questions", [])
+  for q in questions:
+    questions_table.add_row(
+      q.get("question_type", "Unknown"),
+      q.get("question", "No question"),
+      q.get("improvement_target", "No target")
+    )
+  console.print(questions_table)
 
-
-async def generate_responses(state: GraphState) -> GraphState:
-  """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
-
-  
-  user_input = state["messages"][-1].content
-
-  # Parallel execution
-  tasks = [
-    generate_single_response(state["messages"], model, temp)
-    for model, temp in [
-      ("openai:gpt-4.1", 0.1), 
-      ("openai:gpt-4.1-mini", 0.1), 
-      ("openai:gpt-4.1-nano", 0.1)
-    ]
-  ]
-  responses = await asyncio.gather(*tasks)
-  state["responses"] = [response.content for response in responses]
-  state["messages"].append(responses[0])
-  state["user_input"] = user_input
-  return state
-
-# Graph Construction
-def create_response_graph(checkpointer):
-  """Graph Assembly -> Single Node -> Multi-Response Generator"""
-  workflow = StateGraph(GraphState)
-  # Single processing node
-  workflow.add_node("generate_responses", generate_responses)
-  workflow.add_node("evaluate_relevance", evaluate_relevance)
-  workflow.add_node("calculate_contrast", calculate_contrast)
-  workflow.add_node("calculate_confidence", calculate_confidence)
-
-  # Graph flow
-  workflow.set_entry_point("generate_responses")
-  workflow.add_edge("generate_responses", "evaluate_relevance")
-  workflow.add_edge("generate_responses", "calculate_contrast")
-  workflow.add_edge("evaluate_relevance", "calculate_confidence")
-  workflow.add_edge("calculate_contrast", "calculate_confidence")
-
-  workflow.set_finish_point("calculate_confidence")
-
-  return workflow.compile(checkpointer=checkpointer)
-
+# ---------
+# MIAN LOOP
+# ---------
 
 # Execution Framework
 async def run_analysis(user_input: str) -> Dict:
@@ -184,7 +258,9 @@ async def run_analysis(user_input: str) -> Dict:
   graph = create_response_graph(None)
   # print(graph.get_graph().draw_mermaid())
   result = await graph.ainvoke({
-    "user_input": user_input,
+    "messages": [
+      ("human", user_input)
+    ],
     "responses": []
   })
 
@@ -201,12 +277,16 @@ async def run_analysis(user_input: str) -> Dict:
       "contrast_score": round(contrast_score, 3),
       "avg_relevance": round(np.mean(relevance_scores), 3) if relevance_scores else 0.0,
       "peak_relevance": max(relevance_scores) if relevance_scores else 0.0,
-    }
+    },
+    "feedback_questions": result.get("feedback_questions", {})
   }
 
 async def main():
   output = await run_analysis("Where is the location of 2025 AI Engineer World's Fair Agents Hackathon in SF?")
   display_results(output)
+  console = Console()
+  console.print("\n" + "=" * 80 + "\n")
+  display_feedback_questions(output["feedback_questions"])
 
 if __name__ == "__main__":
   asyncio.run(main())
