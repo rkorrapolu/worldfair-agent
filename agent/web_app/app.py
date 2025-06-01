@@ -88,6 +88,20 @@ class ChatLangGraph:
             raise KeyError(f"Thread {thread_id} not found")
         del self.active_threads[thread_id]
 
+    def update_confidence_threshold(self, thread_id: str, threshold: float) -> None:
+        """Update confidence threshold for a thread."""
+        if thread_id not in self.active_threads:
+            raise KeyError(f"Thread {thread_id} not found")
+
+        # Update the graph state with new threshold
+        config = RunnableConfig(configurable={"thread_id": thread_id})
+        current_state = self.graph.get_state(config)
+
+        if current_state.values:
+            # Update the state with new threshold
+            updated_state = {**current_state.values, "confidence_threshold": threshold}
+            self.graph.update_state(config, updated_state)
+
     async def aquery(
         self, message: str, thread_id: str | None = None
     ) -> AsyncGenerator[dict, None]:
@@ -178,6 +192,10 @@ class ThreadHistoryResponse(BaseModel):
     messages: list[MessageInfo]
 
 
+class ConfidenceThresholdUpdate(BaseModel):
+    threshold: float
+
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -238,6 +256,24 @@ async def delete_thread(
     try:
         bot.delete_thread(thread_id)
         return None
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+
+@app.put("/api/threads/{thread_id}/confidence-threshold", status_code=200)
+async def update_confidence_threshold(
+    thread_id: str,
+    threshold_data: ConfidenceThresholdUpdate,
+    bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
+):
+    """Update confidence threshold for a specific thread."""
+    try:
+        # Validate threshold range
+        if not 0.0 <= threshold_data.threshold <= 1.0:
+            raise HTTPException(status_code=400, detail="Threshold must be between 0.0 and 1.0")
+
+        bot.update_confidence_threshold(thread_id, threshold_data.threshold)
+        return {"message": "Confidence threshold updated successfully", "threshold": threshold_data.threshold}
     except KeyError:
         raise HTTPException(status_code=404, detail="Thread not found")
 

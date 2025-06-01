@@ -582,11 +582,34 @@
 
         .confidence-threshold {
             position: absolute;
-            top: 0;
-            height: 100%;
-            width: 2px;
-            background: #fff;
-            opacity: 0.8;
+            top: -6px;
+            height: calc(100% + 12px);
+            width: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .confidence-threshold-triangle {
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 10px solid #fff;
+            opacity: 0.9;
+            transition: opacity 0.2s ease;
+        }
+
+        .confidence-threshold:hover .confidence-threshold-triangle {
+            opacity: 1;
+            border-bottom-color: #10a37f;
+        }
+
+        .confidence-threshold.dragging .confidence-threshold-triangle {
+            border-bottom-color: #10a37f;
+            opacity: 1;
         }
 
         .confidence-status {
@@ -748,7 +771,11 @@
 
             <div class="confidence-bar-container">
                 <div class="confidence-bar" id="confidenceBar"></div>
-                <div class="confidence-threshold" id="confidenceThresholdLine"></div>
+                <div class="confidence-threshold" id="confidenceThresholdLine"
+                     onmousedown="startDragThreshold(event)"
+                     ontouchstart="startDragThreshold(event)">
+                    <div class="confidence-threshold-triangle"></div>
+                </div>
             </div>
 
             <div class="confidence-status" id="confidenceStatus">
@@ -840,6 +867,93 @@
             const thresholdLine = document.getElementById('confidenceThresholdLine');
             if (thresholdLine) {
                 thresholdLine.style.left = `${currentThreshold * 100}%`;
+            }
+        }
+
+        // Threshold dragging functionality
+        let isDraggingThreshold = false;
+        let thresholdDragStart = 0;
+
+        function startDragThreshold(event) {
+            if (isConfidenceMinimized) return;
+
+            isDraggingThreshold = true;
+            const thresholdLine = document.getElementById('confidenceThresholdLine');
+            thresholdLine.classList.add('dragging');
+
+            // Prevent text selection
+            event.preventDefault();
+
+            // Add global event listeners
+            document.addEventListener('mousemove', dragThreshold);
+            document.addEventListener('mouseup', stopDragThreshold);
+            document.addEventListener('touchmove', dragThreshold);
+            document.addEventListener('touchend', stopDragThreshold);
+        }
+
+        function dragThreshold(event) {
+            if (!isDraggingThreshold) return;
+
+            const container = document.querySelector('.confidence-bar-container');
+            if (!container) return;
+
+            const rect = container.getBoundingClientRect();
+            const clientX = event.clientX || (event.touches && event.touches[0].clientX);
+
+            // Calculate new threshold position
+            const relativeX = clientX - rect.left;
+            const newThreshold = Math.max(0, Math.min(1, relativeX / rect.width));
+
+            // Update threshold
+            currentThreshold = newThreshold;
+            updateThresholdLine();
+
+            // Update colors based on new threshold
+            updateConfidenceDisplay(currentConfidence);
+
+            // Update status to show current threshold
+            updateConfidenceStatus(`Threshold: ${Math.round(newThreshold * 100)}%`);
+        }
+
+        function stopDragThreshold(event) {
+            if (!isDraggingThreshold) return;
+
+            isDraggingThreshold = false;
+            const thresholdLine = document.getElementById('confidenceThresholdLine');
+            thresholdLine.classList.remove('dragging');
+
+            // Remove global event listeners
+            document.removeEventListener('mousemove', dragThreshold);
+            document.removeEventListener('mouseup', stopDragThreshold);
+            document.removeEventListener('touchmove', dragThreshold);
+            document.removeEventListener('touchend', stopDragThreshold);
+
+            // Send threshold update to server
+            if (currentThreadId) {
+                updateThresholdOnServer(currentThreadId, currentThreshold);
+            }
+
+            updateConfidenceStatus(`Threshold updated: ${Math.round(currentThreshold * 100)}%`);
+        }
+
+        async function updateThresholdOnServer(threadId, threshold) {
+            try {
+                const response = await fetch(`/api/threads/${threadId}/confidence-threshold`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ threshold: threshold })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to update threshold');
+                }
+
+                console.log('Threshold updated successfully:', threshold);
+            } catch (error) {
+                console.error('Error updating threshold:', error);
+                updateConfidenceStatus('Error updating threshold');
             }
         }
 
