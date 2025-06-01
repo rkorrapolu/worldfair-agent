@@ -134,5 +134,6 @@ async def calculate_confidence(state: GraphState) -> GraphState:
     # We weight both factors equally, but you can adjust the weights
     confidence = (contrast_score + avg_relevance) / 2
     print(f'Confidence: {confidence}')
-    state['confidence_score'] = float(confidence)
-    return state
+    return {
+        'confidence_score': float(confidence)
+    }

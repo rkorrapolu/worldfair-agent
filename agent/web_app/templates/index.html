@@ -759,6 +759,127 @@
             padding: 8px 0;
             margin-bottom: 4px;
         }
+
+        /* Universal metric styles */
+        .confidence-meter.universal-metric {
+            position: fixed;
+            top: 16px;
+            right: 320px;
+            background: #171717;
+            border: 1px solid #2d2d2d;
+            border-radius: 12px;
+            padding: 16px;
+            width: 280px;
+            z-index: 1001;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .confidence-meter.universal-metric.minimized {
+            width: 60px;
+            height: 60px;
+            padding: 8px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .confidence-header.universal-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .confidence-title.universal-metric {
+            font-weight: 600;
+            color: #e1e1e1;
+            font-size: 14px;
+        }
+
+        .confidence-minimize.universal-metric {
+            background: none;
+            border: none;
+            color: #8e8ea0;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 2px;
+            display: none;
+        }
+
+        .confidence-minimize.universal-metric:hover {
+            color: #e1e1e1;
+        }
+
+        .confidence-score.universal-metric {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .confidence-value.universal-metric {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .confidence-label.universal-metric {
+            font-size: 12px;
+            color: #8e8ea0;
+        }
+
+        .confidence-bar-container.universal-metric {
+            position: relative;
+            height: 8px;
+            background: #2d2d2d;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .confidence-bar.universal-metric {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease, background-color 0.3s ease;
+        }
+
+        .confidence-bar.universal-metric.high {
+            background: linear-gradient(90deg, #10a37f, #0d8f6b);
+        }
+
+        .confidence-bar.universal-metric.medium {
+            background: linear-gradient(90deg, #f39c12, #e67e22);
+        }
+
+        .confidence-bar.universal-metric.low {
+            background: linear-gradient(90deg, #e74c3c, #c0392b);
+        }
+
+        .confidence-status.universal-metric {
+            font-size: 11px;
+            color: #8e8ea0;
+            text-align: center;
+            margin-top: 8px;
+            min-height: 14px;
+        }
+
+        .confidence-mini-icon.universal-metric {
+            font-size: 20px;
+            text-align: center;
+            color: #8e8ea0;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .confidence-meter.universal-metric {
+                top: 8px;
+                right: 8px;
+                width: 250px;
+            }
+
+            .confidence-meter.universal-metric.minimized {
+                width: 50px;
+                height: 50px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -858,6 +979,33 @@
 
         <div class="confidence-mini-icon" id="confidenceMiniIcon" style="display: none;">
             📊
+        </div>
+    </div>
+
+    <!-- Universal Metric Display -->
+    <div class="confidence-meter universal-metric" id="universalMetric" style="right: 320px;">
+        <div class="confidence-header">
+            <div class="confidence-title">Universal Metric</div>
+            <button class="confidence-minimize" onclick="toggleUniversalMetric()">−</button>
+        </div>
+
+        <div class="confidence-content" id="universalMetricContent">
+            <div class="confidence-score">
+                <div class="confidence-value" id="universalMetricValue">--</div>
+                <div class="confidence-label" id="universalMetricKey">No metric key</div>
+            </div>
+
+            <div class="confidence-bar-container">
+                <div class="confidence-bar" id="universalMetricBar"></div>
+            </div>
+
+            <div class="confidence-status" id="universalMetricStatus">
+                Waiting for metric updates...
+            </div>
+        </div>
+
+        <div class="confidence-mini-icon" id="universalMetricMiniIcon" style="display: none;">
+            📈
         </div>
     </div>
 
@@ -1214,8 +1362,11 @@
             // Load thread history
             await loadThreadHistory(threadId);
 
-            // Fetch and update confidence for this thread
-            await loadThreadConfidence(threadId);
+            // Fetch and update confidence and universal metric for this thread
+            await Promise.all([
+                loadThreadConfidence(threadId),
+                loadThreadUniversalMetric(threadId)
+            ]);
 
             // Close sidebar on mobile
             if (window.innerWidth <= 768) {
@@ -1411,9 +1562,13 @@
                                     assistantMessage.textContent += data.content;
                                     scrollToBottom();
                                 } else if (data.type === 'confidence_update') {
-                                    // Handle confidence updates from the chat stream
                                     if (data.thread_id === currentThreadId || data.thread_id === threadId) {
                                         handleConfidenceUpdate(data);
+                                    }
+                                } else if (data.type === 'universal_metric_update') {
+                                    if (data.thread_id === currentThreadId || data.thread_id === threadId) {
+                                        updateUniversalMetricDisplay(data);
+                                        updateUniversalMetricStatus(`Updated: ${new Date().toLocaleTimeString()}`);
                                     }
                                 } else if (data.type === 'feedback_questions') {
                                     // Handle feedback questions
@@ -1436,6 +1591,11 @@
                                     // Update confidence status to indicate streaming is complete
                                     if (currentThreadId) {
                                         updateConfidenceStatus('Response complete - monitoring for updates');
+                                    }
+
+                                    // Also load universal metric when complete
+                                    if (currentThreadId) {
+                                        await loadThreadUniversalMetric(currentThreadId);
                                     }
                                 } else if (data.type === 'error') {
                                     showError(`Error: ${data.message}`);
@@ -1549,6 +1709,80 @@
                 toggleSidebar();
             }
         });
+
+        // Universal metric variables
+        let isUniversalMetricMinimized = false;
+
+        function toggleUniversalMetric() {
+            const meter = document.getElementById('universalMetric');
+            const content = document.getElementById('universalMetricContent');
+            const miniIcon = document.getElementById('universalMetricMiniIcon');
+            const minimizeBtn = meter.querySelector('.confidence-minimize');
+
+            isUniversalMetricMinimized = !isUniversalMetricMinimized;
+
+            if (isUniversalMetricMinimized) {
+                meter.classList.add('minimized');
+                content.style.display = 'none';
+                miniIcon.style.display = 'block';
+                minimizeBtn.textContent = '+';
+                meter.onclick = toggleUniversalMetric;
+            } else {
+                meter.classList.remove('minimized');
+                content.style.display = 'block';
+                miniIcon.style.display = 'none';
+                minimizeBtn.textContent = '−';
+                meter.onclick = null;
+            }
+        }
+
+        async function loadThreadUniversalMetric(threadId) {
+            try {
+                const response = await fetch(`/api/threads/${threadId}/uiversal_metric_key`);
+                const data = await response.json();
+
+                // Update the universal metric display
+                updateUniversalMetricDisplay(data);
+                updateUniversalMetricStatus(`Metric updated: ${new Date().toLocaleTimeString()}`);
+            } catch (error) {
+                console.error('Error loading universal metric:', error);
+                updateUniversalMetricDisplay({});
+                updateUniversalMetricStatus('Unable to load metric - using default');
+            }
+        }
+
+        function updateUniversalMetricDisplay(data) {
+            const metricValue = document.getElementById('universalMetricValue');
+            const metricBar = document.getElementById('universalMetricBar');
+            const metricKey = document.getElementById('universalMetricKey');
+            
+            if (data.metric_score !== undefined) {
+                const percentage = Math.round(data.metric_score * 100);
+                metricValue.textContent = `${percentage}%`;
+                metricBar.style.width = `${percentage}%`;
+                
+                // Update metric key
+                metricKey.textContent = data.metric_key || 'Unknown metric';
+                
+                // Update colors based on metric score
+                const level = getConfidenceLevel(data.metric_score);
+                metricValue.className = `confidence-value ${level}`;
+                metricBar.className = `confidence-bar ${level}`;
+            } else {
+                metricValue.textContent = '--';
+                metricBar.style.width = '0%';
+                metricKey.textContent = 'No metric key';
+                metricValue.className = 'confidence-value';
+                metricBar.className = 'confidence-bar';
+            }
+        }
+
+        function updateUniversalMetricStatus(status) {
+            const statusElement = document.getElementById('universalMetricStatus');
+            if (statusElement) {
+                statusElement.textContent = status;
+            }
+        }
     </script>
 </body>
 </html>

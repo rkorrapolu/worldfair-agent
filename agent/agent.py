@@ -113,7 +113,6 @@ async def generate_feedback_questions(state: GraphState) -> GraphState:
     'contrast_score': state.get("contrast_score", 0.0),
     'avg_relevance': np.mean(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0,
     'peak_relevance': max(state.get("relevance_scores", [])) if state.get("relevance_scores") else 0.0,
-    'universal-eval': state["universal_eval"],
   }
   filled_template = template.render(template_data)
 
@@ -157,7 +156,7 @@ def create_response_graph(checkpointer=None):
   workflow.add_edge("calculate_contrast", "calculate_confidence")
   workflow.add_edge("evaluate_relevance", "calculate_confidence")
   workflow.add_edge("calculate_confidence", "generate_feedback_questions")
-  workflow.add_edge("evaluate_universal_metic", "generate_feedback_questions")
+  workflow.add_edge("evaluate_universal_metic", "__end__")
 
   workflow.set_finish_point("generate_feedback_questions")
 
