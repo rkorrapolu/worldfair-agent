@@ -125,10 +125,10 @@ def display_results(output: Dict):
 
   console.print(analytics_table)
 
-async def generate_single_response(messages: list[BaseMessage], temperature: float) -> AIMessage:
+async def generate_single_response(messages: list[BaseMessage], model: str, temperature: float) -> AIMessage:
   """Single Response Generation -> Confidence Scoring"""
 
-  llm = init_chat_model(model="openai:gpt-4.1", api_key=openai_api_key, temperature=temperature)
+  llm = init_chat_model(model=model, api_key=openai_api_key, temperature=temperature)
 
   response = await llm.ainvoke(messages)
 
@@ -143,8 +143,12 @@ async def generate_responses(state: GraphState) -> GraphState:
 
   # Parallel execution
   tasks = [
-    generate_single_response(state["messages"], temp)
-    for temp in [0.1, 0.4, 0.7]
+    generate_single_response(state["messages"], model, temp)
+    for model, temp in [
+      ("openai:gpt-4.1", 0.1), 
+      ("openai:gpt-4.1-mini", 0.1), 
+      ("openai:gpt-4.1-nano", 0.1)
+    ]
   ]
   responses = await asyncio.gather(*tasks)
   state["responses"] = [response.content for response in responses]
