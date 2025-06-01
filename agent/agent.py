@@ -154,7 +154,7 @@ async def generate_responses(state: GraphState) -> GraphState:
   return state
 
 # Graph Construction
-def create_response_graph():
+def create_response_graph(checkpointer):
   """Graph Assembly -> Single Node -> Multi-Response Generator"""
   workflow = StateGraph(GraphState)
   # Single processing node
@@ -170,7 +170,7 @@ def create_response_graph():
   workflow.add_edge("calculate_contrast", "calculate_confidence")
   workflow.set_finish_point("calculate_confidence")
 
-  return workflow.compile()
+  return workflow.compile(checkpointer=checkpointer)
 
 # Execution Framework
 async def run_analysis(user_input: str) -> Dict:
