@@ -1,6 +1,8 @@
-import json
 import asyncio
-from typing import TypedDict, List, Dict
+import json
+import os
+import asyncio
+from typing import Dict
 
 from rich.console import Console
 from rich.table import Table
@@ -13,7 +15,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from langgraph.graph import StateGraph
 
+from state import GraphState
 from setup_logger import initialize_logger
+from confidence_evaluator import calculate_contrast, calculate_confidence, evaluate_relevance
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configuration
 class Settings(BaseSettings):
@@ -37,10 +44,6 @@ class Settings(BaseSettings):
   @property
   def is_development(self) -> bool:
     return self.environment.lower() == "local"
-
-class GraphState(TypedDict):
-  user_input: str
-  responses: List[Dict[str, float]]
 
 settings = Settings()
 logger = initialize_logger(__name__, settings.is_development, settings.log_level)
@@ -102,7 +105,7 @@ def display_results(output: Dict):
 
   console.print(analytics_table)
 
-async def generate_single_response(client: AsyncOpenAI, prompt: str, temperature: float, variant: str) -> Dict[str, float]:
+async def generate_single_response(client: AsyncOpenAI, prompt: str, temperature: float) -> str:
   """Single Response Generation -> Confidence Scoring"""
 
   response = await client.chat.completions.create(
@@ -113,61 +116,47 @@ async def generate_single_response(client: AsyncOpenAI, prompt: str, temperature
   )
 
   content = response.choices[0].message.content
-  confidence_score = calculate_confidence(content, prompt)
 
-  return {
-    "response": content,
-    "confidence": confidence_score,
-    "variant": variant
-  }
+  return content or ""
 
-async def generate_responses_with_confidence(state: GraphState) -> GraphState:
+async def generate_responses(state: GraphState) -> GraphState:
   """User Input -> OpenAI Generation -> 3 Responses -> Confidence Scoring"""
 
-  client = AsyncOpenAI(api_key=settings.genai_openai_api_key)
+  client = AsyncOpenAI(api_key=settings.genai_openai_api_key or os.environ.get("OPENAI_API_KEY"))
   user_query = state["user_input"]
 
   # Generate 3 diverse responses
   prompt_configs = [
-    (f"Provide a comprehensive answer: {user_query}", 0.1, "analytical"),
-    (f"Give a concise, practical response: {user_query}", 0.4, "practical"),
-    (f"Offer an innovative perspective: {user_query}", 0.7, "creative")
+    (f"Provide a comprehensive answer: {user_query}", 0.1),
+    (f"Give a concise, practical response: {user_query}", 0.4),
+    (f"Offer an innovative perspective: {user_query}", 0.7)
   ]
 
   # Parallel execution
   tasks = [
-    generate_single_response(client, prompt, temp, variant)
-    for prompt, temp, variant in prompt_configs
+    generate_single_response(client, prompt, temp)
+    for prompt, temp in prompt_configs
   ]
   responses = await asyncio.gather(*tasks)
-  return {"user_input": user_query, "responses": responses}
-
-def calculate_confidence(response: str, query: str) -> float:
-  """Response Analysis -> Confidence Metrics"""
-
-  # Length relevance (0.3 weight)
-  length_score = min(len(response) / 150, 1.0) * 0.3
-
-  # Keyword overlap (0.4 weight)
-  query_words = set(query.lower().split())
-  response_words = set(response.lower().split())
-  overlap_score = len(query_words.intersection(response_words)) / max(len(query_words), 1) * 0.4
-
-  # Response completeness (0.3 weight)
-  completeness_score = (1.0 if response.endswith(('.', '!', '?')) else 0.7) * 0.3
-
-  return round(length_score + overlap_score + completeness_score, 3)
+  state["responses"] = responses
+  return state
 
 # Graph Construction
 def create_response_graph():
   """Graph Assembly -> Single Node -> Multi-Response Generator"""
   workflow = StateGraph(GraphState)
   # Single processing node
-  workflow.add_node("generate_responses", generate_responses_with_confidence)
+  workflow.add_node("generate_responses", generate_responses)
+  workflow.add_node("evaluate_relevance", evaluate_relevance)
+  workflow.add_node("calculate_contrast", calculate_contrast)
+  workflow.add_node("calculate_confidence", calculate_confidence)
 
   # Graph flow
   workflow.set_entry_point("generate_responses")
-  workflow.set_finish_point("generate_responses")
+  workflow.add_edge("generate_responses", "evaluate_relevance")
+  workflow.add_edge("evaluate_relevance", "calculate_contrast")
+  workflow.add_edge("calculate_contrast", "calculate_confidence")
+  workflow.set_finish_point("calculate_confidence")
 
   return workflow.compile()
 
@@ -182,7 +171,7 @@ async def run_analysis(user_input: str) -> Dict:
   })
 
   # Performance metrics
-  confidence_scores = [r["confidence"] for r in result["responses"]]
+  confidence_scores = [r["confidence_score"] for r in result["responses"]]
   return {
     "query": user_input,
     "responses": result["responses"],
