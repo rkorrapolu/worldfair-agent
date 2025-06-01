@@ -69,39 +69,51 @@ def display_results(output: Dict):
       header_style="bold magenta"
   )
 
-  response_table.add_column("Variant", style="dim", width=12)
-  response_table.add_column("Confidence", justify="center", style="green", width=10)
+  response_table.add_column("Index", style="dim", width=8)
+  response_table.add_column("Relevance", justify="center", style="green", width=10)
   response_table.add_column("Response Content", style="white", width=80)
-  for resp in output["responses"]:
-    confidence_color = "red" if resp["confidence"] < 0.5 else "yellow" if resp["confidence"] < 0.7 else "green"
+
+  responses = output.get("responses", [])
+  relevance_scores = output["analytics"].get("relevance_scores", [])
+
+  for i, resp in enumerate(responses):
+    relevance = relevance_scores[i] if i < len(relevance_scores) else 0.0
+    relevance_color = "red" if relevance < 0.5 else "yellow" if relevance < 0.8 else "green"
+    content = ""
+    if isinstance(resp, dict):
+      content = resp.get("response", resp.get("content", str(resp)))
+    else:
+      content = str(resp)
+
     response_table.add_row(
-      resp["variant"].upper(),
-      f"[{confidence_color}]{resp['confidence']:.3f}[/{confidence_color}]",
-      resp["response"][:150] + "..." if len(resp["response"]) > 150 else resp["response"]
+        f"#{i + 1}",
+        f"[{relevance_color}]{relevance:.3f}[/{relevance_color}]",
+        content[:150] + "..." if len(content) > 150 else content
     )
 
   console.print(response_table)
   console.print()
+
   # Performance Analytics Table
   analytics_table = Table(
-    title="Performance Analytics Dashboard",
-    show_header=True,
-    header_style="bold yellow"
+      title="Performance Analytics Dashboard",
+      show_header=True,
+      header_style="bold yellow"
   )
-
   analytics_table.add_column("Metric", style="cyan", width=25)
   analytics_table.add_column("Value", justify="center", style="white", width=15)
   analytics_table.add_column("Performance Grade", justify="center", style="green", width=20)
   analytics = output["analytics"]
 
   # Performance grading framework
-  avg_conf = analytics["avg_confidence"]
-  grade = "EXCELLENT" if avg_conf > 0.8 else "GOOD" if avg_conf > 0.6 else "MODERATE"
-  grade_color = "green" if avg_conf > 0.8 else "yellow" if avg_conf > 0.6 else "red"
+  conf_score = analytics["confidence_score"]
+  grade = "EXCELLENT" if conf_score > 0.8 else "GOOD" if conf_score > 0.6 else "MODERATE"
+  grade_color = "green" if conf_score > 0.8 else "yellow" if conf_score > 0.6 else "red"
 
-  analytics_table.add_row("Average Confidence", f"{avg_conf:.3f}", f"[{grade_color}]{grade}[/{grade_color}]")
-  analytics_table.add_row("Peak Confidence", f"{analytics['peak_confidence']:.3f}", "OPTIMAL")
-  analytics_table.add_row("Response Diversity", f"{analytics['response_diversity']}", "HIGH")
+  analytics_table.add_row("Confidence Score", f"{conf_score:.3f}", f"[{grade_color}]{grade}[/{grade_color}]")
+  analytics_table.add_row("Average Relevance", f"{analytics['avg_relevance']:.3f}", "OPTIMAL")
+  analytics_table.add_row("Peak Relevance", f"{analytics['peak_relevance']:.3f}", "MAXIMUM")
+  analytics_table.add_row("Contrast Score", f"{analytics['contrast_score']:.3f}", "DIVERSITY")
 
   console.print(analytics_table)
 
@@ -171,20 +183,23 @@ async def run_analysis(user_input: str) -> Dict:
   })
 
   # Performance metrics
-  confidence_scores = [r["confidence_score"] for r in result["responses"]]
+  confidence_score = result.get("confidence_score", 0.0)
+  relevance_scores = result.get("relevance_scores", [])
+  contrast_score = result.get("contrast_score", 0.0)
   return {
     "query": user_input,
     "responses": result["responses"],
     "analytics": {
-      "avg_confidence": round(np.mean(confidence_scores), 3),
-      "peak_confidence": max(confidence_scores),
-      "max_confidence": max(confidence_scores),
-      "response_diversity": len(set(r["response"][:50] for r in result["responses"]))
+      "confidence_score": round(confidence_score, 3),
+      "relevance_scores": relevance_scores,
+      "contrast_score": round(contrast_score, 3),
+      "avg_relevance": round(np.mean(relevance_scores), 3) if relevance_scores else 0.0,
+      "peak_relevance": max(relevance_scores) if relevance_scores else 0.0,
     }
   }
 
 async def main():
-  output = await run_analysis("How can I improve my productivity at work?")
+  output = await run_analysis("Where is the location of 2025 AI Engineer World's Fair Agents Hackathon in SF?")
   display_results(output)
 
 if __name__ == "__main__":

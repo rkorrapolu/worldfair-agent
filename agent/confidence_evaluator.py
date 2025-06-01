@@ -9,7 +9,7 @@ from state import GraphState
 
 load_dotenv()
 
-openai_api_key=os.environ.get("OPENAI_API_KEY")
+openai_api_key=os.environ.get("GENAI_OPENAI_API_KEY")
 
 
 class ContrastEvaluatorOutput(BaseModel):
