@@ -1035,7 +1035,7 @@
 
         // Confidence meter variables
         let currentConfidence = 0;
-        let currentThreshold = 0.7;
+        let currentThreshold = 0.0;
         let isConfidenceMinimized = false;
 
         function handleConfidenceUpdate(data) {
@@ -1359,14 +1359,11 @@
             const threadInfo = await getThreadInfo(threadId);
             document.getElementById('currentThread').textContent = `Thread: ${threadInfo.title}`;
 
-            // Load thread history
+            // Load thread history (now includes confidence and threshold data)
             await loadThreadHistory(threadId);
 
-            // Fetch and update confidence and universal metric for this thread
-            await Promise.all([
-                loadThreadConfidence(threadId),
-                loadThreadUniversalMetric(threadId)
-            ]);
+            // Load universal metric for this thread
+            await loadThreadUniversalMetric(threadId);
 
             // Close sidebar on mobile
             if (window.innerWidth <= 768) {
@@ -1378,22 +1375,6 @@
             const response = await fetch('/api/threads');
             const data = await response.json();
             return data.threads.find(t => t.thread_id === threadId);
-        }
-
-        async function loadThreadConfidence(threadId) {
-            try {
-                const response = await fetch(`/api/threads/${threadId}/confidence`);
-                const data = await response.json();
-
-                // Update the confidence display with the thread's current confidence
-                updateConfidenceDisplay(data.confidence);
-                updateConfidenceStatus(`Thread confidence loaded: ${Math.round(data.confidence * 100)}%`);
-            } catch (error) {
-                console.error('Error loading thread confidence:', error);
-                // Don't show error to user, just log it and use default
-                updateConfidenceDisplay(1.0);
-                updateConfidenceStatus('Unable to load confidence - using default');
-            }
         }
 
         async function deleteThread(event, threadId) {
@@ -1421,49 +1402,19 @@
             }
         }
 
-        async function ensureThreadExists() {
-            if (currentThreadId) {
-                return currentThreadId;
-            }
-
-            if (provisionalThreadId) {
-                return provisionalThreadId;
-            }
-
-            // Create a new provisional thread
-            try {
-                const response = await fetch('/api/threads', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({})
-                });
-
-                const data = await response.json();
-                provisionalThreadId = data.thread_id;
-                return provisionalThreadId;
-            } catch (error) {
-                console.error('Error creating provisional thread:', error);
-                throw error;
-            }
-        }
-
-        async function sendSuggestion(message) {
-            if (isStreaming) return;
-
-            const messageInput = document.getElementById('messageInput');
-            messageInput.value = message;
-
-            // Trigger the send message function
-            const event = new Event('submit');
-            document.querySelector('.chat-input-form').dispatchEvent(event);
-        }
-
         async function loadThreadHistory(threadId) {
             try {
                 const response = await fetch(`/api/threads/${threadId}/history`);
                 const data = await response.json();
+
+                // Initialize confidence and threshold from backend
+                currentConfidence = data.confidence;
+                currentThreshold = data.threshold;
+
+                // Update confidence display
+                updateConfidenceDisplay(data.confidence);
+                updateThresholdLine();
+                updateConfidenceStatus(`Thread loaded: ${Math.round(data.confidence * 100)}% confidence, ${Math.round(data.threshold * 100)}% threshold`);
 
                 const chatMessages = document.getElementById('chatMessages');
                 const welcomeMessage = document.getElementById('welcomeMessage');
@@ -1493,6 +1444,12 @@
                 scrollToBottom();
             } catch (error) {
                 console.error('Error loading thread history:', error);
+                // Use defaults on error
+                currentConfidence = 1.0;
+                currentThreshold = 0.0;
+                updateConfidenceDisplay(1.0);
+                updateThresholdLine();
+                updateConfidenceStatus('Unable to load thread data - using defaults');
                 showError('Failed to load conversation history');
             }
         }
@@ -1755,15 +1712,15 @@
             const metricValue = document.getElementById('universalMetricValue');
             const metricBar = document.getElementById('universalMetricBar');
             const metricKey = document.getElementById('universalMetricKey');
-            
+
             if (data.metric_score !== undefined) {
                 const percentage = Math.round(data.metric_score * 100);
                 metricValue.textContent = `${percentage}%`;
                 metricBar.style.width = `${percentage}%`;
-                
+
                 // Update metric key
                 metricKey.textContent = data.metric_key || 'Unknown metric';
-                
+
                 // Update colors based on metric score
                 const level = getConfidenceLevel(data.metric_score);
                 metricValue.className = `confidence-value ${level}`;
@@ -1782,6 +1739,45 @@
             if (statusElement) {
                 statusElement.textContent = status;
             }
+        }
+
+        async function ensureThreadExists() {
+            if (currentThreadId) {
+                return currentThreadId;
+            }
+
+            if (provisionalThreadId) {
+                return provisionalThreadId;
+            }
+
+            // Create a new provisional thread
+            try {
+                const response = await fetch('/api/threads', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({})
+                });
+
+                const data = await response.json();
+                provisionalThreadId = data.thread_id;
+                return provisionalThreadId;
+            } catch (error) {
+                console.error('Error creating provisional thread:', error);
+                throw error;
+            }
+        }
+
+        async function sendSuggestion(message) {
+            if (isStreaming) return;
+
+            const messageInput = document.getElementById('messageInput');
+            messageInput.value = message;
+
+            // Trigger the send message function
+            const event = new Event('submit');
+            document.querySelector('.chat-input-form').dispatchEvent(event);
         }
     </script>
 </body>

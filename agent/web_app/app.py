@@ -59,16 +59,19 @@ class ChatLangGraph:
             return 0
         return self.active_threads[thread_id]["message_count"]
 
-    def get_thread_confidence(self, thread_id: str) -> float:
-        """Get confidence score for a thread."""
+    def get_thread_confidence(self, thread_id: str) -> dict:
+        """Get confidence score and threshold for a thread."""
         if thread_id not in self.active_threads:
             raise KeyError(f"Thread {thread_id} not found")
 
         # Get the latest state from the graph
         config = RunnableConfig(configurable={"thread_id": thread_id})
         state = self.graph.get_state(config)
-        return state.values.get("confidence_score", 1.0)
-    
+        return {
+            "confidence": state.values.get("confidence_score", 1.0),
+            "threshold": state.values.get("confidence_threshold", 0.7)
+        }
+
     def get_thread_universal_metric(self, thread_id: str) -> dict:
         """Get confidence score for a thread."""
         if thread_id not in self.active_threads:
@@ -124,13 +127,15 @@ class ChatLangGraph:
         config = RunnableConfig(configurable={"thread_id": thread_id})
         current_state = self.graph.get_state(config)
         current_confidence = 1.0  # Default for new threads
+        current_confidence_threshold = 0.0  # Default for new threads
         if current_state.values and "confidence_score" in current_state.values:
             current_confidence = current_state.values["confidence_score"]
+            current_confidence_threshold = current_state.values.get("confidence_threshold", 0.0)
 
         input_data = {
             "messages": [HumanMessage(content=message)],
             "confidence_score": current_confidence,
-            "confidence_threshold": 0.0
+            "confidence_threshold": current_confidence_threshold
         }
 
         async for chunk in self.graph.astream(
@@ -205,6 +210,8 @@ class MessageInfo(BaseModel):
 
 class ThreadHistoryResponse(BaseModel):
     messages: list[MessageInfo]
+    confidence: float
+    threshold: float
 
 
 class ConfidenceThresholdUpdate(BaseModel):
@@ -249,18 +256,28 @@ async def list_threads(bot: Annotated[ChatLangGraph, Depends(get_chatbot)]):
 async def get_thread_history(
     thread_id: str, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
 ):
-    """Get conversation history for a specific thread."""
-    history = bot.get_thread_messages(thread_id)
-    messages = []
-    for msg in history:
-        messages.append(
-            MessageInfo(
-                type=msg.type,
-                content=msg.content,
-                timestamp=getattr(msg, 'timestamp', None),
+    """Get conversation history and confidence data for a specific thread."""
+    try:
+        history = bot.get_thread_messages(thread_id)
+        confidence_data = bot.get_thread_confidence(thread_id)
+
+        messages = []
+        for msg in history:
+            messages.append(
+                MessageInfo(
+                    type=msg.type,
+                    content=msg.content,
+                    timestamp=getattr(msg, 'timestamp', None),
+                )
             )
+
+        return ThreadHistoryResponse(
+            messages=messages,
+            confidence=confidence_data["confidence"],
+            threshold=confidence_data["threshold"]
         )
-    return ThreadHistoryResponse(messages=messages)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Thread not found")
 
 
 @app.delete("/api/threads/{thread_id}", status_code=204)
@@ -293,17 +310,6 @@ async def update_confidence_threshold(
         raise HTTPException(status_code=404, detail="Thread not found")
 
 
-@app.get("/api/threads/{thread_id}/confidence")
-async def get_thread_confidence(
-    thread_id: str, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]
-):
-    """Get current confidence score for a specific thread."""
-    try:
-        confidence = bot.get_thread_confidence(thread_id)
-        return {"confidence": confidence, "thread_id": thread_id}
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    
 @app.get("/api/threads/{thread_id}/uiversal_metric_key")
 async def get_thread_universal_metric(
     thread_id: str, bot: Annotated[ChatLangGraph, Depends(get_chatbot)]

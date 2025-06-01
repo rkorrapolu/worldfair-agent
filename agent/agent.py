@@ -170,11 +170,11 @@ def create_response_graph(checkpointer=None):
   workflow.add_edge("generate_responses", "calculate_contrast")
   workflow.add_edge("calculate_contrast", "calculate_confidence")
   workflow.add_edge("evaluate_relevance", "calculate_confidence")
-  workflow.add_edge("calculate_confidence", "generate_feedback_questions")
-  workflow.add_edge("evaluate_universal_metic", "__end__")
-
   workflow.add_conditional_edges("calculate_confidence", conditional_feedback_or_end)
+  workflow.add_edge("evaluate_universal_metic", END)
   workflow.set_finish_point("generate_feedback_questions")
+
+
 
   return workflow.compile(checkpointer=checkpointer)
 
