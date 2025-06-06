@@ -1,4 +1,4 @@
-# Self-Aware Agent ArchitectureAdd commentMore actions
+# Self-Aware Agent Architecture
 
 The Agent System is an adaptive AI architecture that autonomously generates evaluation criteria, produces multiple response candidates, and iteratively improves through confidence-based self-correction. The system leverages LLM-as-a-judge mechanisms combined with log probability confidence scoring to deliver high-quality outputs while continuously enhancing its own evaluation capabilities and prompt strategies.
 
